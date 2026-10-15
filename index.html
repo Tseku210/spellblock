@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Block Dungeon Spell Runner</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Pixelify+Sans:wght@400;600;700&display=swap">
+  <link rel="stylesheet" href="style.css">
+  <script src="script.js" defer></script>
+</head>
+<body>
+  <main class="app">
+    <section class="game-shell" aria-label="Game area">
+      <div class="top-bar">
+        <div class="title-block">
+          <h1>Block Dungeon Spell Runner</h1>
+          <p>Clear 30 rooms. Every room has its own boss. Something waits after the last one.</p>
+        </div>
+        <div class="stats" aria-label="Player stats">
+          <div class="meter">
+            <span id="hpLabel">HP</span>
+            <div class="meter-track"><div id="hpBar" class="meter-fill hp"></div></div>
+            <strong id="hpText">120/120</strong>
+          </div>
+          <div class="meter">
+            <span id="manaLabel">Mana</span>
+            <div class="meter-track"><div id="manaBar" class="meter-fill mana"></div></div>
+            <strong id="manaText">90/90</strong>
+          </div>
+          <div id="p2Meters" class="p2-meters" hidden>
+            <div class="meter">
+              <span>P2 HP</span>
+              <div class="meter-track"><div id="hp2Bar" class="meter-fill hp"></div></div>
+              <strong id="hp2Text">120/120</strong>
+            </div>
+            <div class="meter">
+              <span>P2 Mana</span>
+              <div class="meter-track"><div id="mana2Bar" class="meter-fill mana"></div></div>
+              <strong id="mana2Text">90/90</strong>
+            </div>
+          </div>
+          <div class="stat-row">
+            <span class="coin-chip" title="Coins"><i class="coin-icon"></i><strong id="coinText">0</strong></span>
+            <button id="soundBtn" class="chip-btn" type="button">Sound: On</button>
+            <button id="pauseBtn" class="chip-btn" type="button">Pause</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="canvas-wrap">
+        <canvas id="gameCanvas" width="960" height="640" aria-label="2D dungeon game canvas"></canvas>
+        <div id="touchControls" class="touch-controls" hidden>
+          <div id="stick" class="stick" aria-label="Move stick"><div id="stickKnob" class="stick-knob"></div></div>
+          <div class="touch-buttons">
+            <button type="button" class="tbtn spell" data-action="spell0" style="--c:#ff742e">1</button>
+            <button type="button" class="tbtn spell" data-action="spell1" style="--c:#9be7ff">2</button>
+            <button type="button" class="tbtn spell" data-action="spell2" style="--c:#ffe45c">3</button>
+            <button type="button" class="tbtn spell" data-action="spell3" style="--c:#ff9ff3">4</button>
+            <button type="button" class="tbtn spell" data-action="spell4" style="--c:#7bd35a">5</button>
+            <button type="button" class="tbtn flask" data-action="flask">Flask</button>
+            <button type="button" class="tbtn block" data-action="block">Block</button>
+            <button type="button" class="tbtn dash" data-action="dash">Dash</button>
+            <button type="button" class="tbtn fire" data-action="fire">Zap</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="controls">
+        <span><kbd>WASD</kbd> / <kbd>Arrows</kbd> Move</span>
+        <span><kbd>Mouse</kbd> Aim</span>
+        <span>Hold <kbd>Space</kbd> / <kbd>Click</kbd> Staff</span>
+        <span><kbd>Shift</kbd> / <kbd>Right click</kbd> Dash</span>
+        <span><kbd>1</kbd>-<kbd>5</kbd> Spells</span>
+        <span>Hold <kbd>F</kbd> Block, tap it just before a hit to Parry</span>
+        <span><kbd>Q</kbd> Healing flask</span>
+        <span><kbd>P</kbd> Pause</span>
+        <span><kbd>M</kbd> Sound</span>
+      </div>
+      <div class="controls coop">
+        <span class="who">Two players</span>
+        <span><b>P1</b> <kbd>WASD</kbd> move, <kbd>Space</kbd> / <kbd>Click</kbd> staff, <kbd>Left Shift</kbd> dash, <kbd>1</kbd>-<kbd>5</kbd> spells, <kbd>F</kbd> block, <kbd>Q</kbd> flask</span>
+        <span><b>P2</b> <kbd>Arrows</kbd> or <kbd>IJKL</kbd> move, staff fires by itself, <kbd>Enter</kbd> / <kbd>Right Shift</kbd> dash, <kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd> <kbd>0</kbd> <kbd>-</kbd> spells, <kbd>.</kbd> block, <kbd>/</kbd> flask</span>
+      </div>
+    </section>
+
+    <aside class="side-panel" aria-label="Minimap and autotracker">
+      <section class="panel-card">
+        <h2>Mini Map</h2>
+        <div id="miniMap" class="mini-map" aria-label="Dungeon minimap"></div>
+        <div class="legend">
+          <span><i class="legend-box current"></i>Current</span>
+          <span><i class="legend-box clear"></i>Cleared</span>
+          <span><i class="legend-box danger"></i>Boss Alive</span>
+          <span><i class="legend-box unknown"></i>Unseen</span>
+          <span><i class="legend-box gate"></i>Big Boss</span>
+        </div>
+      </section>
+
+      <section class="panel-card">
+        <h2>Auto Tracker</h2>
+        <dl class="tracker">
+          <div><dt>Room</dt><dd id="trackRoom">1 / 30</dd></div>
+          <div><dt>Biome</dt><dd id="trackBiome">Grass Vault</dd></div>
+          <div><dt>Boss</dt><dd id="trackBoss">Alive</dd></div>
+          <div><dt>Enemies</dt><dd id="trackEnemies">0 poofed</dd></div>
+          <div><dt>Bosses Cleared</dt><dd id="trackBosses">0 / 30</dd></div>
+          <div><dt>Big Bosses</dt><dd id="trackBig">0 / 5</dd></div>
+          <div><dt>Time</dt><dd id="trackTime">0:00</dd></div>
+          <div><dt>Current Goal</dt><dd id="trackGoal">Defeat this room boss</dd></div>
+        </dl>
+      </section>
+
+      <section class="panel-card">
+        <h2>Spells</h2>
+        <div id="spellList" class="spell-list"></div>
+      </section>
+
+      <section class="panel-card">
+        <h2>Combo Book</h2>
+        <p class="small-note"><strong id="comboCount">0</strong> of 4 spell combos found. Mix two spells on the same enemy!</p>
+        <ul id="comboList" class="combo-list"></ul>
+      </section>
+
+      <section class="panel-card">
+        <h2>Hat Closet</h2>
+        <p class="small-note"><strong id="hatCount">1</strong> of 22 hats. Every boss and big boss drops its own hat. Click one to wear it.</p>
+        <div id="hatGrid" class="hat-grid"></div>
+      </section>
+
+      <section class="panel-card">
+        <h2>Pet Den</h2>
+        <p class="small-note">Your pet: <strong id="petCount">Pixel the Fox</strong>. Pick one of 6 pets on the title screen (<kbd>Q</kbd>/<kbd>E</kbd>) or click one here before a run.</p>
+        <div id="petGrid" class="hat-grid"></div>
+      </section>
+
+      <section class="panel-card">
+        <h2>Power-ups</h2>
+        <ul id="upgradeList" class="upgrade-list"></ul>
+      </section>
+
+      <section class="panel-card">
+        <h2>Bestiary</h2>
+        <p class="small-note"><strong id="bestiaryCount">0</strong> of <span id="bestiaryTotal">24</span> enemy types discovered. Meet them all!</p>
+        <div id="bestiary" class="bestiary"></div>
+      </section>
+    </aside>
+  </main>
+</body>
+</html>
