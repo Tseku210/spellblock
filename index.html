@@ -8,6 +8,7 @@
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="feedback.css">
   <script src="script.js" defer></script>
+  <script src="sprites.js" defer></script>
   <script src="feedback.js" defer></script>
 </head>
 <body>
@@ -16,7 +17,7 @@
       <div class="top-bar">
         <div class="title-block">
           <h1>Block Dungeon Spell Runner</h1>
-          <p>Clear 30 rooms. Every room has its own boss. Something waits after the last one.</p>
+          <p>Five worlds, two chapters each. Beat every boss, rest at the campfire, face the big boss. Something waits after the last world.</p>
         </div>
         <div class="stats" aria-label="Player stats">
           <div class="meter">
@@ -59,6 +60,7 @@
             <button type="button" class="tbtn spell" data-action="spell2" style="--c:#ffe45c">3</button>
             <button type="button" class="tbtn spell" data-action="spell3" style="--c:#ff9ff3">4</button>
             <button type="button" class="tbtn spell" data-action="spell4" style="--c:#7bd35a">5</button>
+            <button type="button" class="tbtn special" data-action="special">Special</button>
             <button type="button" class="tbtn flask" data-action="flask">Flask</button>
             <button type="button" class="tbtn block" data-action="block">Block</button>
             <button type="button" class="tbtn dash" data-action="dash">Dash</button>
@@ -74,14 +76,15 @@
         <span><kbd>Shift</kbd> / <kbd>Right click</kbd> Dash</span>
         <span><kbd>1</kbd>-<kbd>5</kbd> Spells</span>
         <span>Hold <kbd>F</kbd> Block, tap it just before a hit to Parry</span>
+        <span><kbd>E</kbd> Staff special move</span>
         <span><kbd>Q</kbd> Healing flask</span>
         <span><kbd>P</kbd> Pause</span>
         <span><kbd>M</kbd> Sound</span>
       </div>
       <div class="controls coop">
         <span class="who">Two players</span>
-        <span><b>P1</b> <kbd>WASD</kbd> move, <kbd>Space</kbd> / <kbd>Click</kbd> staff, <kbd>Left Shift</kbd> dash, <kbd>1</kbd>-<kbd>5</kbd> spells, <kbd>F</kbd> block, <kbd>Q</kbd> flask</span>
-        <span><b>P2</b> <kbd>Arrows</kbd> or <kbd>IJKL</kbd> move, staff fires by itself, <kbd>Enter</kbd> / <kbd>Right Shift</kbd> dash, <kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd> <kbd>0</kbd> <kbd>-</kbd> spells, <kbd>.</kbd> block, <kbd>/</kbd> flask</span>
+        <span><b>P1</b> <kbd>WASD</kbd> move, <kbd>Space</kbd> / <kbd>Click</kbd> staff, <kbd>Left Shift</kbd> dash, <kbd>1</kbd>-<kbd>5</kbd> spells, <kbd>E</kbd> special, <kbd>F</kbd> block, <kbd>Q</kbd> flask</span>
+        <span><b>P2</b> <kbd>Arrows</kbd> or <kbd>IJKL</kbd> move, staff fires by itself, <kbd>Enter</kbd> / <kbd>Right Shift</kbd> dash, <kbd>7</kbd> <kbd>8</kbd> <kbd>9</kbd> <kbd>0</kbd> <kbd>-</kbd> spells, <kbd>,</kbd> special, <kbd>.</kbd> block, <kbd>/</kbd> flask</span>
       </div>
     </section>
 
@@ -101,8 +104,8 @@
       <section class="panel-card">
         <h2>Auto Tracker</h2>
         <dl class="tracker">
-          <div><dt>Room</dt><dd id="trackRoom">1 / 30</dd></div>
-          <div><dt>Biome</dt><dd id="trackBiome">Grass Vault</dd></div>
+          <div><dt>Where</dt><dd id="trackRoom">World 1 · Chapter 1 · Room 1</dd></div>
+          <div><dt>World</dt><dd id="trackBiome">Greenwood · Grass Vault</dd></div>
           <div><dt>Boss</dt><dd id="trackBoss">Alive</dd></div>
           <div><dt>Enemies</dt><dd id="trackEnemies">0 poofed</dd></div>
           <div><dt>Bosses Cleared</dt><dd id="trackBosses">0 / 30</dd></div>

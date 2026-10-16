@@ -309,6 +309,12 @@ p {
   font-size: 0.8rem;
 }
 
+.tbtn.special {
+  background: rgba(192, 132, 252, 0.88);
+  color: #1d0d2b;
+  font-size: 0.66rem;
+}
+
 .tbtn:active {
   transform: translateY(2px);
   filter: brightness(1.2);

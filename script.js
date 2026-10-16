@@ -139,7 +139,25 @@ const biomes = [
   { name: "Lava Keep", floor: "#4b2720", floor2: "#673123", wall: "#1e1715", ambient: "ember", root: 55 },
   { name: "Ice Cavern", floor: "#77b7c9", floor2: "#5f9cad", wall: "#d7f4ff", ambient: "snow", root: 64 },
   { name: "Sand Crypt", floor: "#caa55d", floor2: "#ad8a4c", wall: "#806030", ambient: "sand", root: 62 },
-  { name: "Mossy Ruin", floor: "#415d38", floor2: "#334c2c", wall: "#59614c", ambient: "spore", root: 59 }
+  { name: "Mossy Ruin", floor: "#415d38", floor2: "#334c2c", wall: "#59614c", ambient: "spore", root: 59 },
+  { name: "Snowy Pass", floor: "#dfeef2", floor2: "#c9dde3", wall: "#7a8fa0", ambient: "snow", root: 63 },
+  { name: "Moon Tomb", floor: "#3b3550", floor2: "#322c45", wall: "#17131f", ambient: "dust", root: 50 },
+  { name: "Glow Grotto", floor: "#244a52", floor2: "#1d3d44", wall: "#0f1f24", ambient: "firefly", root: 52 },
+  { name: "Crystal Hollow", floor: "#4f3f80", floor2: "#433570", wall: "#1f1838", ambient: "dust", root: 54 }
+];
+
+/* The dungeon is a run through five worlds, one per row of the map. Each world
+   has two chapters of three rooms. The third room of a chapter holds the
+   chapter boss (a sword boss), and the world ends with a big boss arena.
+   Beat the big boss and the door on the right of its arena leads to the next
+   world. The last arena opens the golden portal to the dragon. */
+const ROOM_PER_CHAPTER = 3;
+const worlds = [
+  { name: "Greenwood", color: "#7ee36f", biomes: [0, 5] },
+  { name: "Ember Mountain", color: "#ff9b5a", biomes: [1, 2] },
+  { name: "Frost Peaks", color: "#9be7ff", biomes: [6, 3] },
+  { name: "Moonlit Desert", color: "#e6c27a", biomes: [4, 7] },
+  { name: "Crystal Depths", color: "#c4a8ff", biomes: [8, 9] }
 ];
 
 const dragonBiome = { name: "Dragon's Hoard", floor: "#5a4318", floor2: "#4a3612", wall: "#2a1d0a", ambient: "ember", root: 53 };
@@ -222,6 +240,8 @@ const enemyTypes = [
 
 // The first 15 types can be room bosses (each has a boss name and a boss body).
 const BOSS_TYPE_COUNT = 15;
+// Bosses raise a Spirit Lantern as a shield totem (see summonTotem).
+const LANTERN_TYPE = enemyTypes.findIndex((type) => type.behavior === "lantern");
 
 const BOSS_PATTERNS = ["aim", "ring", "spiral", "summon", "charge"];
 
@@ -229,6 +249,10 @@ const BOSS_PATTERNS = ["aim", "ring", "spiral", "summon", "charge"];
    once all six room bosses in that row are beaten. Each big boss has its own
    arena, look, attacks and hat. */
 const ARENA_START = DRAGON_ROOM + 1;
+// The Spirit Tree's grove sits after the five arenas (see startTreeMode).
+const TREE_ROOM = ARENA_START + 5;
+const TREE_WAVES = 30;
+const treeBiome = { name: "Spirit Grove", floor: "#3f7a4a", floor2: "#356a40", wall: "#2a3d22", ambient: "firefly", root: 58 };
 const BIG_HP_BONUS = 20;
 const bigBosses = [
   {
@@ -238,7 +262,7 @@ const bigBosses = [
   },
   {
     name: "Magmaw the Lava Golem", title: "Heart of the Volcano", color: "#6b4a3e", accent: "#ff7a2e", shot: "#ff9b3d", minion: 4,
-    patterns: ["slam", "rain", "ring", "charge", "aim"], rage: "spiral", rageLine: "Magmaw is boiling over!",
+    patterns: ["slam", "rain", "barrage", "ring", "charge", "aim"], rage: "spiral", rageLine: "Magmaw is boiling over!",
     biome: { name: "Volcano Throne", floor: "#3a1a12", floor2: "#4a2117", wall: "#140c0a", ambient: "ember", root: 48, deco: "lava" }
   },
   {
@@ -253,7 +277,7 @@ const bigBosses = [
   },
   {
     name: "Crystal Colossus", title: "Guardian of the Crystal Cathedral", color: "#8f6cff", accent: "#d6c7ff", shot: "#e0d4ff", minion: 9,
-    patterns: ["ring", "slam", "rain", "spiral", "teleport", "aim"], rage: "charge", rageLine: "The Crystal Colossus is cracking with power!",
+    patterns: ["ring", "slam", "barrage", "rain", "spiral", "teleport", "aim"], rage: "charge", rageLine: "The Crystal Colossus is cracking with power!",
     biome: { name: "Crystal Cathedral", floor: "#4a3a78", floor2: "#3f3268", wall: "#1c1535", ambient: "firefly", root: 54, deco: "crystals" }
   }
 ];
@@ -331,8 +355,22 @@ const upgrades = [
   { id: "endurance", name: "Endurance", desc: "+25 max stamina and it refills faster", color: "#86efac", icon: "boot", max: 3, apply: () => { stats.maxStamina += 25; stats.staminaRegen += 8; for (const p of players) p.stamina = stats.maxStamina; } },
   { id: "pet", name: "Pet Power", desc: "Every pet attacks faster and harder", color: "#fb923c", icon: "fox", max: 5, requires: () => state.petUnlocked, apply: () => { stats.petLevel += 1; } },
   { id: "fork", name: "Forked Bolts", desc: "Chain Lightning jumps 2 more times and hits harder", color: "#ffe45c", icon: "bolt", max: 3, requires: () => state.bossesDefeated >= 3, apply: () => { stats.chainJumps += 2; stats.zapDamage += 15; } },
-  { id: "bubble", name: "Bigger Bubble", desc: "Bubble Shield lasts longer and its bounced shots hit harder", color: "#ff9ff3", icon: "shield", max: 3, requires: () => state.bossesDefeated >= 8, apply: () => { stats.shieldTime += 1.5; stats.reflectDamage += 15; } }
+  { id: "bubble", name: "Bigger Bubble", desc: "Bubble Shield lasts longer and its bounced shots hit harder", color: "#ff9ff3", icon: "shield", max: 3, requires: () => state.bossesDefeated >= 8, apply: () => { stats.shieldTime += 1.5; stats.reflectDamage += 15; } },
+  // Ranked cards: picking one again raises its rank (I to IV). The game reads
+  // the rank with rank(id) wherever the card does something.
+  { id: "firebolt", name: "Fire Bolts", desc: "Each rank: staff bolts get a 15% chance to set enemies on fire", color: "#ff742e", icon: "spell:fireball", max: 4, apply: () => {} },
+  { id: "frostbolt", name: "Frost Bolts", desc: "Each rank: staff bolts get a 10% chance to freeze enemies", color: "#9be7ff", icon: "spell:frost", max: 4, apply: () => {} },
+  { id: "venombolt", name: "Venom Bolts", desc: "Staff bolts poison enemies. Each rank makes the poison hurt more", color: "#7bd35a", icon: "spell:poison", max: 4, apply: () => {} },
+  { id: "crit", name: "Lucky Crit", desc: "Each rank: an 8% chance for any hit to do double damage", color: "#ffe45c", icon: "crit", max: 4, apply: () => {} },
+  { id: "thorns", name: "Thorny Robe", desc: "Enemies that hit you get hurt back. More per rank", color: "#a3e635", icon: "thorn", max: 4, apply: () => {} },
+  { id: "feather", name: "Feather Step", desc: "Each rank: a 7% chance to dodge a hit completely", color: "#e6f7ff", icon: "feather", max: 4, apply: () => {} },
+  { id: "rune", name: "Rune Circle", desc: "A magic circle bursts around you every 3 seconds: fire, then ice, then lightning. Bigger per rank", color: "#c084fc", icon: "rune", max: 4, apply: () => {} },
+  { id: "practice", name: "Staff Practice", desc: "Your staff's special move comes back 15% sooner", color: "#fff2a3", icon: "staff", max: 3, apply: () => {} },
+  { id: "jar", name: "Spirit Jar", desc: "Hold 1 more spirit orb, and run a little faster", color: "#7dffd4", icon: "orb", max: 4, apply: () => {} },
+  { id: "fury", name: "Spirit Fury", desc: "Each spirit orb you hold adds 4% more damage", color: "#ff8a5c", icon: "orb", max: 4, apply: () => {} },
+  { id: "snack", name: "Spirit Snack", desc: "Heal 2% of your max HP for every spirit orb you grab", color: "#ff9ff3", icon: "orb", max: 4, apply: () => {} }
 ];
+const ROMAN = ["I", "II", "III", "IV", "V", "VI", "VII"];
 
 /* Evolutions turn a spell or the dash into a stronger version. One shows up
    on the power-up screen as soon as it is ready. A wizard picks one dash style. */
@@ -639,7 +677,14 @@ function makePlayer(index) {
     dashStart: -9,
     perfectDone: true,
     restedHere: false,
-    fireWarn: 0
+    fireWarn: 0,
+    staff: { id: "apprentice", level: 1 },
+    spirits: 0,
+    spiritTimer: 0,
+    specialCd: 0,
+    specialMax: 1,
+    grabbing: null,
+    grabTime: 0
   };
 }
 
@@ -716,7 +761,15 @@ const state = {
   lastLost: 0,
   bigBeaten: new Set(),
   picksLeft: 0,
-  intro: null
+  intro: null,
+  tips: {},
+  treeMode: false,
+  tree: null,
+  playMode: "dungeon",
+  bestWave: 0,
+  charm: false,
+  shopFlasks: 0,
+  scrolls: 0
 };
 
 /* ---------- audio: tiny chiptune synth ---------- */
@@ -766,7 +819,9 @@ function savePrefs() {
     looks: state.looks,
     pet: state.petPick,
     hats: [...state.hatsUnlocked],
-    combos: [...state.combosFound]
+    combos: [...state.combosFound],
+    mode: state.playMode,
+    bestWave: state.bestWave
   });
 }
 
@@ -910,12 +965,15 @@ function updateMusic() {
 function createRooms() {
   const list = [];
   for (let index = 0; index < ROOM_COUNT; index += 1) {
-    list.push({ index, biome: biomes[index % biomes.length], visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false });
+    const row = Math.floor(index / ROOM_COLS);
+    const chapter = (index % ROOM_COLS) < ROOM_PER_CHAPTER ? 0 : 1;
+    list.push({ index, biome: biomes[worlds[row].biomes[chapter]], visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false });
   }
   list.push({ index: DRAGON_ROOM, biome: dragonBiome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 30, final: true });
   bigBosses.forEach((big, row) => {
     list.push({ index: ARENA_START + row, biome: big.biome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false, arena: true, row });
   });
+  list.push({ index: TREE_ROOM, biome: treeBiome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false, tree: true });
   return list;
 }
 
@@ -944,13 +1002,38 @@ function currentRoom() {
   return rooms[state.roomIndex];
 }
 
+function roomRow(room) {
+  if (room.tree) return Math.min(ROOM_ROWS - 1, Math.floor((state.tree ? state.tree.wave : 0) / 6));
+  if (room.final) return ROOM_ROWS - 1;
+  return room.arena ? room.row : Math.floor(room.index / ROOM_COLS);
+}
+
+function roomChapter(room) {
+  return (room.index % ROOM_COLS) < ROOM_PER_CHAPTER ? 1 : 2;
+}
+
+// "World 2 · Chapter 1 · Room 3" style labels for the HUD and the tracker.
+function roomLabel(room, short = false) {
+  if (room.tree) return "Spirit Tree";
+  if (room.final) return "Dragon's Lair";
+  const w = roomRow(room) + 1;
+  if (room.arena) return short ? `World ${w} · Big Boss` : `World ${w} · Big Boss Arena`;
+  const n = (room.index % ROOM_PER_CHAPTER) + 1;
+  return short ? `World ${w}-${roomChapter(room)} · Room ${n}` : `World ${w} · Chapter ${roomChapter(room)} · Room ${n}`;
+}
+
 function roomDoors(room) {
   if (room.final) return { up: false, down: false, left: false, right: false };
   // The arena door stays shut until its big boss is beaten.
-  if (room.arena) return { up: false, down: false, left: !(room.boss && room.boss.hp > 0), right: false };
+  if (room.tree) return { up: false, down: false, left: false, right: false };
+  if (room.arena) {
+    // The door on the right leads on to the next world once the big boss is beaten.
+    const beaten = !(room.boss && room.boss.hp > 0);
+    return { up: false, down: false, left: beaten, right: room.row < ROOM_ROWS - 1 && (beaten || Boolean(room.cameFromRight)) };
+  }
   const col = room.index % ROOM_COLS;
   const row = Math.floor(room.index / ROOM_COLS);
-  return { up: row > 0, down: row < ROOM_ROWS - 1, left: col > 0, right: col < ROOM_COLS - 1 || gateOpen(row) };
+  return { up: false, down: false, left: col > 0 || row > 0, right: col < ROOM_COLS - 1 || gateOpen(row) };
 }
 
 function livingFoes(room) {
@@ -1121,6 +1204,21 @@ function makeCrates(room, rng) {
   return crates;
 }
 
+function addPillars(room, rng, count) {
+  let tries = 0;
+  let added = 0;
+  while (added < count && tries < 60) {
+    tries += 1;
+    const x = (5 + Math.floor(rng() * 20)) * TILE;
+    const y = (3 + Math.floor(rng() * 12)) * TILE;
+    if (Math.abs(x + TILE / 2 - WIDTH / 2) < 90 && Math.abs(y + 24 - HEIGHT / 2) < 90) continue;
+    if (Math.abs(y + 24 - HEIGHT / 2) < DOOR_HALF + 30 && (x < 200 || x > WIDTH - 200)) continue;
+    if (room.crates.some((crate) => Math.abs(crate.x - x) < TILE * 3 && Math.abs(crate.y - y) < TILE * 3)) continue;
+    room.crates.push({ x, y, w: TILE, h: 48, hp: 99, wobble: 0, stone: true });
+    added += 1;
+  }
+}
+
 function findSpawn(room, rng, entry, minDist) {
   let spot = { x: WIDTH / 2, y: HEIGHT / 2 };
   for (let i = 0; i < 60; i += 1) {
@@ -1148,14 +1246,29 @@ function populateRoom(room, entry, tier) {
   room.cleared = false;
   room.enemies = [];
   room.crates = room.final || room.arena ? [] : makeCrates(room, rng);
-  if (hasCampfire(room)) room.crates = room.crates.filter((crate) => Math.hypot(crate.x + TILE / 2 - CAMPFIRE.x, crate.y + TILE / 2 - CAMPFIRE.y) > 80);
+  if (hasCampfire(room)) {
+    const fire = campfireSpot(room);
+    const stall = shopSpot(room);
+    room.crates = room.crates.filter((crate) => Math.hypot(crate.x + TILE / 2 - fire.x, crate.y + TILE / 2 - fire.y) > 80 && Math.hypot(crate.x + TILE / 2 - stall.x, crate.y + TILE / 2 - stall.y) > 80);
+  }
 
+  if (room.tree) {
+    // No boss until a boss wave; the trunk is a crate nothing can break.
+    room.boss = { hp: 0, maxHp: 1, name: "", x: -200, y: -200, size: 1, isBoss: true, dummy: true, type: { color: "#000000", accent: "#000000" } };
+    const tree = state.tree || { x: WIDTH / 2, y: HEIGHT / 2 - 10 };
+    room.crates = [{ x: tree.x - 30, y: tree.y - 40, w: 60, h: 56, hp: 99, wobble: 0, stone: true, tree: true }];
+    for (const [cx, cy] of [[224, 160], [704, 160], [224, 448], [704, 448]]) room.crates.push({ x: cx, y: cy, w: TILE, h: TILE, hp: 2, wobble: 0 });
+    return;
+  }
   if (room.final) {
     room.boss = makeDragon();
     return;
   }
   if (room.arena) {
     room.boss = makeBigBoss(room.row, tier);
+    if (room.boss.patterns.includes("barrage")) {
+      for (const [px, py] of [[288, 160], [288, 432], [544, 160], [544, 432]]) room.crates.push({ x: px, y: py, w: TILE, h: 48, hp: 99, wobble: 0, stone: true });
+    }
     return;
   }
 
@@ -1180,6 +1293,11 @@ function populateRoom(room, entry, tier) {
   room.boss = makeEnemy(bossType, spot.x, spot.y, { tier, boss: true, roomIndex: room.index });
   if (isSwordRoom(room)) makeSwordBoss(room.boss, tier);
   else if (tier >= 10) room.boss.patterns.push("retreat");
+  // The middle room of each chapter gets a cannon boss and stone pillars to hide behind.
+  if (!room.boss.melee && room.index % ROOM_PER_CHAPTER === 1 && tier >= 5) {
+    room.boss.patterns.splice(1, 0, "barrage");
+    addPillars(room, rng, 3);
+  }
 }
 
 /* ---------- sword bosses ----------
@@ -1218,6 +1336,10 @@ function nextSwing(boss) {
   boss.state = "swing";
   boss.stateTimer = swing.delay;
   boss.swingTotal = swing.delay;
+  if (swing.unparry && !state.tips.unparry) {
+    state.tips.unparry = true;
+    toast("White flash! You can't block or parry that slash. Dash out of the way!", 3.5);
+  }
 }
 
 function afterSwing(boss) {
@@ -1253,6 +1375,10 @@ function meleeHit(boss, swing) {
   boss.swordAngle = angle + swing.side * 1.4;
   sfx.slash(swing.heavy);
   if (swing.heavy) addShake(4);
+  boss.unparryHit = Boolean(swing.unparry);
+  if (swing.kind === "spin" && (boss.isBig || boss.desperate || roomTier() >= 6)) {
+    effects.push({ type: "bladering", x: boss.x, y: boss.y, radius: reach * 0.8, life: 1.5, max: 1.5, damage: boss.damage * 0.6, color: boss.shotColor || boss.type.accent, cd: [0, 0] });
+  }
   for (const p of livingPlayers()) {
     const dx = p.x - boss.x;
     const dy = p.y - boss.y;
@@ -1263,6 +1389,7 @@ function meleeHit(boss, swing) {
     hurtPlayer(p, damage, boss.x, boss.y, boss);
     if (isStunned(boss)) break;
   }
+  boss.unparryHit = false;
 }
 
 // A jump attack: lands with a shockwave, then follows up with a quick slash.
@@ -1275,6 +1402,7 @@ function meleeLanding(boss) {
   for (const p of livingPlayers()) {
     if (Math.hypot(p.x - boss.x, p.y - boss.y) < radius + p.r) hurtPlayer(p, boss.damage * 1.3, boss.x, boss.y, boss);
   }
+  if (roomTier() >= 12) addShockwave(boss, 1);
   if (!isStunned(boss)) startSwings(boss, [{ kind: "arc", delay: 0.22 }]);
 }
 
@@ -1451,6 +1579,9 @@ function resetWorld() {
     bigBeaten: new Set(),
     picksLeft: 0,
     intro: null,
+    charm: false,
+    shopFlasks: 0,
+    scrolls: 0,
     petsOwned: new Set(PET_IDS),
     petChoice: state.petPick,
     powerDps: 0,
@@ -1458,7 +1589,9 @@ function resetWorld() {
     slowmo: 0,
     checkpoint: 0,
     lostCoins: null,
-    lastLost: 0
+    lastLost: 0,
+    treeMode: false,
+    tree: null
   });
   for (const p of players) {
     p.hp = stats.maxHp;
@@ -1476,6 +1609,10 @@ function resetWorld() {
     p.stun = 0;
     p.drinking = 0;
     p.blocking = false;
+    p.staff = newStaff();
+    p.specialCd = 0;
+    p.grabbing = null;
+    p.spirits = 0;
   }
   banners.length = 0;
   particles.length = 0;
@@ -1562,21 +1699,31 @@ function startNewGame() {
   state.mode = "playing";
   enterRoom(0, { x: WIDTH / 2, y: HEIGHT / 2 }, true);
   toast(state.twoPlayer ? "Team up! Stand next to a bonked friend to help them up." : "Find every room boss and clear the dungeon!", 3.5);
-  banner("Room 1", "Defeat the boss, then pick a door", "#f6c85f");
+  banner(`World 1: ${worlds[0].name}`, "Chapter 1 · Beat the boss, then head right", worlds[0].color, 3);
+}
+
+// Where to wake up after saving inside a big boss arena.
+function arenaSaveRoom(room) {
+  if (room.boss && room.boss.hp <= 0 && room.row < ROOM_ROWS - 1) return (room.row + 1) * ROOM_COLS;
+  return rowEnd(room.row);
 }
 
 function saveGame() {
-  if (state.won) return;
+  // Spirit Tree runs are never saved, so they can't touch the dungeon save.
+  if (state.won || state.treeMode) return;
   const data = {
     v: 2,
     robe: state.looks[0].robe,
     coins: state.coins,
     time: state.time,
-    room: state.mode === "dead" ? state.checkpoint : currentRoom().final ? 0 : currentRoom().arena ? rowEnd(currentRoom().row) : state.roomIndex,
+    room: state.mode === "dead" ? state.checkpoint : currentRoom().final ? rowEnd(ROOM_ROWS - 1) : currentRoom().arena ? arenaSaveRoom(currentRoom()) : state.roomIndex,
     big: [...state.bigBeaten],
     checkpoint: state.checkpoint,
     lostCoins: state.lostCoins,
     flasks: [player.flasks, players[1].flasks],
+    staffs: players.map((p) => p.staff),
+    shop: { flasks: state.shopFlasks, charm: state.charm, scrolls: state.scrolls },
+    drops: rooms.flatMap((room) => (room.staffDrops || []).map((drop) => ({ room: room.index, id: drop.id, level: drop.level, x: Math.round(drop.x), y: Math.round(drop.y) }))),
     stats,
     upgradeCounts: state.upgradeCounts,
     petUnlocked: state.petUnlocked,
@@ -1616,12 +1763,19 @@ function loadGame() {
   const big = Array.isArray(data.big) ? data.big : [];
   state.bigBeaten = new Set(big.filter((row) => Number.isInteger(row) && bigBosses[row]));
   stats.maxHp += BIG_HP_BONUS * state.bigBeaten.size;
-  state.checkpoint = Number.isInteger(data.checkpoint) && data.checkpoint % ROOM_COLS === 0 && data.checkpoint < ROOM_COUNT ? data.checkpoint : 0;
+  const shop = data.shop || {};
+  state.shopFlasks = clamp(shop.flasks | 0, 0, 2);
+  state.charm = Boolean(shop.charm);
+  state.scrolls = Math.max(0, shop.scrolls | 0);
+  stats.maxFlasks += state.shopFlasks;
+  state.checkpoint = Number.isInteger(data.checkpoint) && rooms[data.checkpoint] && hasCampfire(rooms[data.checkpoint]) ? data.checkpoint : 0;
   const lost = data.lostCoins;
   state.lostCoins = lost && Number.isInteger(lost.room) && rooms[lost.room] && lost.amount > 0 ? { room: lost.room, x: Number(lost.x) || WIDTH / 2, y: Number(lost.y) || HEIGHT / 2, amount: lost.amount | 0 } : null;
   players.forEach((p, i) => {
     const saved = Array.isArray(data.flasks) ? data.flasks[i] : undefined;
     p.flasks = Number.isInteger(saved) ? clamp(saved, 0, stats.maxFlasks) : stats.maxFlasks;
+    const staff = Array.isArray(data.staffs) ? data.staffs[i] : null;
+    p.staff = staff && staffTypes[staff.id] ? { id: staff.id, level: clamp(staff.level | 0, 1, STAFF_MAX_LEVEL) } : newStaff();
     p.stamina = stats.maxStamina;
   });
   state.petUnlocked = Boolean(data.petUnlocked);
@@ -1653,8 +1807,15 @@ function loadGame() {
     arena.cleared = true;
   }
 
+  for (const drop of Array.isArray(data.drops) ? data.drops : []) {
+    const room = rooms[drop.room];
+    if (!room || !staffTypes[drop.id]) continue;
+    if (!room.staffDrops) room.staffDrops = [];
+    room.staffDrops.push({ id: drop.id, level: clamp(drop.level | 0, 1, STAFF_MAX_LEVEL), x: Number(drop.x) || WIDTH / 2, y: Number(drop.y) || HEIGHT / 2, t: 0, blocked: -1 });
+  }
+
   state.bossesDefeated = countBossesDefeated();
-  state.portalOpen = state.bossesDefeated >= ROOM_COUNT;
+  state.portalOpen = state.bigBeaten.has(ROOM_ROWS - 1);
   player.hp = clamp(Number(data.hp) || stats.maxHp, 1, stats.maxHp);
   player.mana = clamp(Number(data.mana) || stats.maxMana, 0, stats.maxMana);
   players[1].hp = clamp(Number(data.hp2) || stats.maxHp, 1, stats.maxHp);
@@ -1695,6 +1856,7 @@ function enterRoom(index, entry, silent = false) {
 
   state.roomIndex = index;
   const room = rooms[index];
+  const firstVisit = !room.visited;
   if (!room.populated) populateRoom(room, entry, room.final ? 30 : Math.min(state.bossesDefeated, 29));
   else repositionFoes(room, entry);
   room.visited = true;
@@ -1721,12 +1883,18 @@ function enterRoom(index, entry, silent = false) {
     room.boss.hp = room.boss.maxHp;
   }
 
+  if (firstVisit && !silent) announceChapter(room);
+
   if (room.arena && room.boss.hp > 0) {
     startIntro(room);
   } else if (room.boss.hp > 0) {
     room.boss.attackTimer = 2;
+    if (!room.final && !room.tree && room.tier >= 2 && room.boss.hp === room.boss.maxHp && !silent) {
+      // From the third boss on, they throw something the moment you walk in.
+      Object.assign(room.boss, { state: "tell", tellTime: 0.8, stateTimer: 0.8, feint: 0, opener: true, attackTimer: 2.6 });
+    }
     if (!silent) sfx.boss();
-    banner(room.boss.name, room.final ? "The final boss!" : room.boss.melee ? "Sword boss! Block, parry or dodge its slashes" : `Boss of Room ${index + 1}`, "#ff8b7d");
+    banner(room.boss.name, room.final ? "The final boss!" : room.boss.melee ? `Chapter ${roomChapter(room)} boss! Block, parry or dodge its slashes` : roomLabel(room), "#ff8b7d");
   } else if (!silent) {
     sfx.door();
   }
@@ -1739,20 +1907,24 @@ function changeRoom(dx, dy, mover = player) {
   const room = currentRoom();
   let target;
   if (room.arena) {
-    if (dx !== -1) return;
-    target = rowEnd(room.row);
+    if (dx === -1) target = rowEnd(room.row);
+    else if (dx === 1 && room.row < ROOM_ROWS - 1) target = (room.row + 1) * ROOM_COLS;
+    else return;
   } else {
     const col = state.roomIndex % ROOM_COLS;
     const row = Math.floor(state.roomIndex / ROOM_COLS);
-    const newCol = col + dx;
-    const newRow = row + dy;
+    if (dy !== 0) return;
     if (dx === 1 && col === ROOM_COLS - 1) {
-      // Through the big gate at the end of the row.
+      // Through the big gate at the end of the world.
       if (!gateOpen(row)) return;
       target = ARENA_START + row;
+    } else if (dx === -1 && col === 0) {
+      // Back through the previous world's big boss arena.
+      if (row === 0) return;
+      target = ARENA_START + row - 1;
+      rooms[target].cameFromRight = true;
     } else {
-      if (newCol < 0 || newCol >= ROOM_COLS || newRow < 0 || newRow >= ROOM_ROWS) return;
-      target = newRow * ROOM_COLS + newCol;
+      target = row * ROOM_COLS + col + dx;
     }
   }
 
@@ -1766,7 +1938,17 @@ function changeRoom(dx, dy, mover = player) {
   enterRoom(target, { x: mover.x, y: mover.y });
 }
 
+// A banner when you step into a new world or a new chapter.
+function announceChapter(room) {
+  if (room.final || room.arena || room.tree) return;
+  const col = room.index % ROOM_COLS;
+  const world = worlds[roomRow(room)];
+  if (col === 0) banner(`World ${roomRow(room) + 1}: ${world.name}`, `Chapter 1 · ${room.biome.name}`, world.color, 3);
+  else if (col === ROOM_PER_CHAPTER) banner("Chapter 2", `${world.name} · ${room.biome.name}`, world.color, 2.6);
+}
+
 function enterDragonRoom() {
+  state.portalOpen = false;
   placePlayers(WIDTH / 2, HEIGHT - 110);
   for (const p of activePlayers()) {
     if (p.hp <= 0) revivePlayer(p, 0.3);
@@ -1802,6 +1984,8 @@ function handlePlayKey(event, key, code, digit) {
   }
   if (two && (code === "Minus" || code === "NumpadSubtract")) castSpell(p2, 4);
   if (!event.repeat && (code === "KeyQ" || (!code && key === "q"))) drinkFlask(player);
+  if (!event.repeat && (code === "KeyE" || (!code && key === "e"))) useSpecial(player);
+  if (!event.repeat && two && (code === "Comma" || code === "NumpadMultiply")) useSpecial(p2);
   if (!event.repeat && two && (code === "Slash" || code === "NumpadAdd")) drinkFlask(p2);
   if (!two && key === "shift") tryDash(player);
   if (two && (code === "ShiftLeft" || (!code && key === "shift"))) tryDash(player);
@@ -1839,10 +2023,11 @@ window.addEventListener("keydown", (event) => {
       if (code === "KeyE" || code === "KeyT" || (!code && (key === "e" || key === "t"))) cyclePet(1);
       if (digit && digit.n === 1 && state.twoPlayer) togglePlayers();
       if (digit && digit.n === 2 && !state.twoPlayer) togglePlayers();
-      if (key === "enter" || key === " ") {
-        if (state.hasSave) loadGame() || startNewGame();
-        else startNewGame();
+      if (code === "Tab" || key === "tab") {
+        event.preventDefault();
+        togglePlayMode();
       }
+      if (key === "enter" || key === " ") startChosenMode();
       break;
     }
     case "intro":
@@ -1860,15 +2045,15 @@ window.addEventListener("keydown", (event) => {
       if (digit && digit.n >= 1 && digit.n <= state.upgradeChoices.length) chooseUpgrade(digit.n - 1);
       if (key === "r") rerollUpgrades();
       break;
+    case "shop":
+      if (digit && digit.n >= 1 && digit.n <= 5) buyShopItem(digit.n - 1);
+      if (key === "escape" || key === "enter" || key === "q" || key === "e") closeShop();
+      break;
     case "dead":
       if (key === "r" || key === "enter") restartInRoom();
       break;
     case "victory":
-      if (key === "enter") {
-        writeStorage(SAVE_KEY, null);
-        state.hasSave = false;
-        state.mode = "title";
-      }
+      if (key === "enter") finishVictory();
       break;
     default:
       break;
@@ -2024,6 +2209,7 @@ for (const button of ui.touch.querySelectorAll("[data-action]")) {
     else if (action === "block") touch.block = true;
     else if (action === "flask") drinkFlask(player);
     else if (action === "dash") tryDash(player);
+    else if (action === "special") useSpecial(player);
     else if (action.startsWith("spell")) castSpell(player, Number(action.slice(5)));
   });
   if (action === "block") {
@@ -2176,11 +2362,12 @@ function shootStaff(p) {
       vx: Math.cos(angle) * 480,
       vy: Math.sin(angle) * 480,
       r: 7,
-      damage: stats.staffDamage,
+      damage: stats.staffDamage * staffPower(p),
       life: 0.85,
       owner: "player",
       kind: "staff",
-      color: p.index === 0 ? "#fff2a3" : "#c6f6ff",
+      bolt: true,
+      color: p.staff.id !== "apprentice" ? staffInfo(p.staff).gem : p.index === 0 ? "#fff2a3" : "#c6f6ff",
       spin: 0
     });
   }
@@ -2767,13 +2954,22 @@ function damageEnemy(enemy, amount, source = "staff") {
     amount *= 0.15;
     if (Math.random() < 0.3) floatText(enemy.x, enemy.y - enemy.size, "Ting!", "#c9c4d2", 13);
   }
+  amount *= spiritMult();
+  const dot = source === "burn" || source === "poison";
+  const crit = !dot && rank("crit") > 0 && Math.random() < 0.08 * rank("crit");
+  if (crit) amount *= 2;
+  if (enemy.isBoss && totemAlive(enemy)) {
+    amount *= 0.25;
+    if (Math.random() < 0.15) floatText(enemy.x, enemy.y - enemy.size, "Shielded!", "#7dffb0", 13);
+  }
   const damage = Math.max(1, Math.round(amount * (isStunned(enemy) ? 1.5 : 1)));
   enemy.hp -= damage;
   const burn = source === "burn";
   if (!burn) enemy.flash = 0.12;
   const color = source === "frost" ? "#bdf1ff" : source === "zap" ? "#ffe45c" : source === "fire" || burn ? "#ffb070" : source === "steam" ? "#e6f7ff" : source === "poison" ? "#a3e635" : "#ffffff";
   const small = burn || source === "poison";
-  floatText(enemy.x + rand(-10, 10), enemy.y - enemy.size / 2 - 8, String(damage), color, small ? 12 : enemy.isBoss ? 18 : 15);
+  if (crit) floatText(enemy.x + rand(-10, 10), enemy.y - enemy.size / 2 - 12, `CRIT ${damage}`, "#ffe45c", enemy.isBoss ? 22 : 19);
+  else floatText(enemy.x + rand(-10, 10), enemy.y - enemy.size / 2 - 8, String(damage), color, small ? 12 : enemy.isBoss ? 18 : 15);
   if (!enemy.isBoss && !small) {
     const from = nearestPlayer(enemy.x, enemy.y);
     const away = Math.hypot(enemy.x - from.x, enemy.y - from.y) || 1;
@@ -2797,6 +2993,18 @@ function defeatEnemy(enemy) {
   }
   enemy.hp = 0;
   state.enemiesDefeated += 1;
+  if (enemy.isBoss) {
+    for (const totem of room.enemies) {
+      if (totem.totem && totem.hp > 0) {
+        totem.hp = 0;
+        burst(totem.x, totem.y, [totem.type.accent, "#ffffff"], 12, 180);
+      }
+    }
+  }
+  if (enemy.totem && enemy.owner && enemy.owner.hp > 0) {
+    floatText(enemy.owner.x, enemy.owner.y - enemy.owner.size, "Shield broken!", "#7dffb0", 20);
+    addRing(enemy.owner.x, enemy.owner.y, enemy.owner.size * 1.2, "#7dffb0", 0.4, 8);
+  }
 
   if (enemy.isDragon) {
     befriendDragon(enemy);
@@ -2823,14 +3031,16 @@ function defeatEnemy(enemy) {
     dropLoot(enemy.x, enemy.y, "gem", 8);
     dropLoot(enemy.x, enemy.y, "heart", 1);
     dropLoot(enemy.x, enemy.y, "star", 1);
+    dropLoot(enemy.x, enemy.y, "spirit", 3);
     onBossDefeated(enemy);
   } else {
     const coins = enemy.temp ? (Math.random() < 0.5 ? 1 : 0) : 1 + (Math.random() < 0.4 ? 1 : 0);
     dropLoot(enemy.x, enemy.y, "coin", coins);
     if (Math.random() < 0.1 + stats.luck) dropLoot(enemy.x, enemy.y, "star", 1);
+    if (Math.random() < (enemy.temp ? 0.15 : 0.5)) dropLoot(enemy.x, enemy.y, "spirit", 1);
   }
 
-  if (!room.cleared && isRoomCleared(room)) {
+  if (!state.treeMode && !room.cleared && isRoomCleared(room)) {
     room.cleared = true;
     if (!enemy.isBoss) {
       toast("Room cleared! Pick a door to explore.", 3);
@@ -2840,6 +3050,10 @@ function defeatEnemy(enemy) {
 }
 
 function onBossDefeated(boss) {
+  if (state.treeMode) {
+    treeBossDown(boss);
+    return;
+  }
   const room = currentRoom();
   state.bossesDefeated = countBossesDefeated();
   const count = state.bossesDefeated;
@@ -2856,6 +3070,10 @@ function onBossDefeated(boss) {
 
   banner("Boss defeated!", `${boss.name} went poof!`, "#9ee49c");
   unlockHat(boss.typeIndex + 1);
+  if (boss.melee) {
+    dropStaff(room, boss.x, boss.y + 30, rollStaff(roomRow(room)));
+    toast("The chapter boss dropped a staff! Stand on it to grab it.", 3.5);
+  }
   if (room.cleared || isRoomCleared(room)) {
     room.cleared = true;
     toast("Room cleared! Pick a door to explore.", 3.5);
@@ -2876,12 +3094,8 @@ function onBossDefeated(boss) {
   if (count === spells[4].unlockAt) banner("New spell!", `Poison Potion unlocked. Press ${state.twoPlayer ? "5 (P2: -)" : "5"}`, "#7bd35a", 3);
   const row = Math.floor(room.index / ROOM_COLS);
   if (row < ROOM_ROWS && rowBossesBeaten(row) === ROOM_COLS && !state.bigBeaten.has(row)) {
-    banner("A big gate opened!", `${bigBosses[row].name} waits at the end of row ${row + 1}`, "#c084fc", 3.6);
-    toast(`Row ${row + 1} done! Find the big gate on the right side of Room ${rowEnd(row) + 1}.`, 4);
-  }
-  if (count === ROOM_COUNT) {
-    state.portalOpen = true;
-    banner("All 30 bosses defeated!", "A golden portal opened in Room 1...", "#f6c85f", 4);
+    banner("A big gate opened!", `${bigBosses[row].name} waits at the end of ${worlds[row].name}`, "#c084fc", 3.6);
+    toast(`World ${row + 1} cleared! The big gate is on the right side of the last room. Rest at its campfire first.`, 4.5);
   }
 
   state.upgradeTimer = 1.5;
@@ -3011,8 +3225,10 @@ function onBigBossDefeated(boss) {
   sfx.bigWin();
 
   dropLoot(boss.x, boss.y, "gem", 10);
+  dropStaff(room, boss.x, boss.y + 50, rollStaff(boss.row, 2));
   dropLoot(boss.x, boss.y, "heart", 2);
   dropLoot(boss.x, boss.y, "star", 2);
+  dropLoot(boss.x, boss.y, "spirit", 5);
   stats.maxHp += BIG_HP_BONUS;
   for (const p of activePlayers()) {
     if (p.hp <= 0) revivePlayer(p, 1);
@@ -3022,6 +3238,14 @@ function onBigBossDefeated(boss) {
   }
 
   banner("BIG BOSS DEFEATED!", `${big.name} is beaten! +${BIG_HP_BONUS} max HP and +10% spell power`, "#f6c85f", 4.2);
+  if (state.treeMode) {
+    // No doors or portals by the tree.
+  } else if (boss.row < ROOM_ROWS - 1) {
+    banner(`World ${boss.row + 2} is open!`, `${worlds[boss.row + 1].name} waits through the door on the right`, worlds[boss.row + 1].color, 3.4);
+  } else {
+    state.portalOpen = true;
+    banner("A golden portal opened!", "Step into it in the middle of this arena...", "#f6c85f", 4);
+  }
   unlockHat(BIG_HAT + boss.row);
   toast("Huge reward! Full heal, a pile of gems and 2 power-ups to pick.", 4);
   state.picksLeft = 2;
@@ -3076,8 +3300,16 @@ function hurtPlayer(p, amount, fromX, fromY, attacker = null) {
     p.invulnerable = 0.2;
     return "shield";
   }
+  if (rank("feather") && Math.random() < 0.07 * rank("feather")) {
+    p.invulnerable = 0.4;
+    floatText(p.x, p.y - 40, "Dodged!", "#e6f7ff", 16);
+    burst(p.x, p.y, ["#ffffff", "#e6f7ff"], 8, 120, { lift: 40 });
+    return "dodge";
+  }
   let blocked = false;
-  if (p.blocking) {
+  const unblockable = Boolean(attacker && attacker.unparryHit);
+  if (p.blocking && unblockable) floatText(p.x, p.y - 46, "Can't block that!", "#ffffff", 15);
+  if (p.blocking && !unblockable) {
     if (!p.parryUsed && state.time - p.blockStart <= PARRY_WINDOW) {
       parry(p, attacker);
       return "parry";
@@ -3112,6 +3344,8 @@ function hurtPlayer(p, amount, fromX, fromY, attacker = null) {
     p.kx = ((p.x - fromX) / length) * push;
     p.ky = ((p.y - fromY) / length) * push;
   }
+  if (!blocked) loseSpirit(p);
+  thornsBack(attacker);
   if (p.hp > 0) return blocked ? "block" : "hit";
 
   burst(p.x, p.y, [robeOf(p).robe, "#ffffff"], 24, 220);
@@ -3228,18 +3462,27 @@ function finishDrink(p) {
 
 /* ---------- campfires and lost coins ---------- */
 
-// The first room of every row has a campfire. Resting there (with no enemies
-// around) heals you, refills flasks and makes it the place you wake up.
+// The first room of every world has a campfire, and so does the last room,
+// right before the big boss gate. Resting there (with no enemies around) heals
+// you, refills flasks and makes it the place you wake up.
 const CAMPFIRE = { x: 190, y: 150 };
+const CAMPFIRE_END = { x: WIDTH - 190, y: 150 };
 
 function hasCampfire(room) {
-  return !room.final && !room.arena && room.index % ROOM_COLS === 0;
+  if (room.final || room.arena || room.tree) return false;
+  const col = room.index % ROOM_COLS;
+  return col === 0 || col === ROOM_COLS - 1;
+}
+
+function campfireSpot(room) {
+  return room.index % ROOM_COLS === ROOM_COLS - 1 ? CAMPFIRE_END : CAMPFIRE;
 }
 
 function updateCampfire(p) {
   const room = currentRoom();
   if (!hasCampfire(room)) return;
-  const near = Math.hypot(p.x - CAMPFIRE.x, p.y - CAMPFIRE.y) < 44;
+  const fire = campfireSpot(room);
+  const near = Math.hypot(p.x - fire.x, p.y - fire.y) < 44;
   if (!near) {
     p.restedHere = false;
     return;
@@ -3265,7 +3508,8 @@ function restAtCampfire(room) {
     p.restedHere = true;
   }
   state.checkpoint = room.index;
-  burst(CAMPFIRE.x, CAMPFIRE.y - 10, ["#ffd166", "#ff742e", "#ffffff"], 24, 200, { lift: 60 });
+  const fire = campfireSpot(room);
+  burst(fire.x, fire.y - 10, ["#ffd166", "#ff742e", "#ffffff"], 24, 200, { lift: 60 });
   sfx.chime();
   toast("Rested at the campfire. Flasks refilled, and you'll wake up here.", 3);
   saveGame();
@@ -3291,13 +3535,17 @@ function resetBoss(room) {
   if (room.arena) room.boss = makeBigBoss(room.row, room.tier);
   else if (room.final) room.boss = makeDragon();
   else {
-    Object.assign(room.boss, { hp: room.boss.maxHp, enraged: false, furious: false, state: "move", spiralTime: 0, stunUntil: 0, alpha: 1, hop: 0, swings: null });
+    Object.assign(room.boss, { hp: room.boss.maxHp, enraged: false, furious: false, state: "move", spiralTime: 0, stunUntil: 0, alpha: 1, hop: 0, swings: null, totemDone: false, opener: false, swordOutUntil: 0 });
     room.boss.patternIndex = 0;
   }
   room.enemies = room.enemies.filter((enemy) => !enemy.temp);
 }
 
 function restartInRoom() {
+  if (state.treeMode) {
+    startTreeMode();
+    return;
+  }
   resetBoss(currentRoom());
   for (const p of activePlayers()) {
     p.hp = stats.maxHp;
@@ -3316,11 +3564,1240 @@ function restartInRoom() {
   effects.length = 0;
   state.mode = "playing";
   state.slowmo = 0;
-  const spot = { x: CAMPFIRE.x + 70, y: CAMPFIRE.y + 50 };
+  const fire = campfireSpot(rooms[state.checkpoint]);
+  const spot = { x: fire.x + (fire.x < WIDTH / 2 ? 70 : -70), y: fire.y + 50 };
   placePlayers(spot.x, spot.y);
   enterRoom(state.checkpoint, spot, true);
   toast(state.lostCoins ? `You woke up at the campfire. Your ${state.lostCoins.amount} coins are waiting where you fell!` : "You woke up at the campfire. Try a different plan!", 3.5);
   sfx.heal();
+}
+
+/* ---------- spirit orbs and Rage ----------
+   Defeated enemies drop glowing spirit orbs. A wizard holds 2 to start, and
+   each one makes them hit harder and run a little faster. Orbs fade one by
+   one if you stop fighting, and a hit knocks one loose. Holding a full set
+   puts you in a Rage for even more damage. */
+const SPIRIT_COLOR = "#7dffd4";
+const SPIRIT_FADE = 7;
+
+function spiritCap() {
+  return 2 + rank("jar") + (state.charm ? 1 : 0);
+}
+
+function inRage(p) {
+  return p.hp > 0 && p.spirits > 0 && p.spirits >= spiritCap();
+}
+
+function spiritBonus(p) {
+  if (p.hp <= 0) return 1;
+  return (1 + p.spirits * (0.08 + 0.04 * rank("fury"))) * (inRage(p) ? 1.1 : 1);
+}
+
+// Damage is shared by the team, so the bonus is the average of both wizards.
+function spiritMult() {
+  const list = livingPlayers();
+  if (!list.length) return 1;
+  return list.reduce((sum, p) => sum + spiritBonus(p), 0) / list.length;
+}
+
+function gainSpirit(p) {
+  const cap = spiritCap();
+  const before = inRage(p);
+  p.spirits = Math.min(cap, p.spirits + 1);
+  p.spiritTimer = SPIRIT_FADE;
+  const snack = rank("snack");
+  if (snack && p.hp < stats.maxHp) {
+    const heal = Math.max(1, Math.round(stats.maxHp * 0.02 * snack));
+    p.hp = Math.min(stats.maxHp, p.hp + heal);
+    floatText(p.x, p.y - 30, `+${heal}`, "#ff8b7d", 12);
+  }
+  if (!before && inRage(p)) {
+    floatText(p.x, p.y - 50, "RAGE!", "#ff5a3d", 22);
+    addRing(p.x, p.y, 50, "#ff5a3d", 0.3, 6);
+    tone(180, 0.25, { type: "sawtooth", volume: 0.06, slide: 220 });
+    if (!state.tips.rage) {
+      state.tips.rage = true;
+      toast("Rage! A full set of spirit orbs makes you hit much harder. Keep fighting to keep it!", 3.5);
+    }
+  } else {
+    tone(700 + p.spirits * 120, 0.08, { type: "sine", volume: 0.04 });
+  }
+}
+
+function loseSpirit(p, count = 1) {
+  if (p.spirits <= 0) return;
+  p.spirits = Math.max(0, p.spirits - count);
+  burst(p.x, p.y - 8, [SPIRIT_COLOR, "#ffffff"], 6, 120);
+}
+
+function updateSpirits(p, dt) {
+  if (p.spirits <= 0) return;
+  p.spirits = Math.min(p.spirits, spiritCap());
+  p.spiritTimer -= dt;
+  if (p.spiritTimer <= 0) {
+    p.spirits -= 1;
+    p.spiritTimer = SPIRIT_FADE;
+    burst(p.x, p.y - 8, [SPIRIT_COLOR], 4, 60, { lift: 40 });
+  }
+}
+
+function drawSpirits(p) {
+  if (p.hp <= 0) return;
+  if (inRage(p)) {
+    ctx.strokeStyle = `rgba(255, 90, 61, ${0.4 + Math.sin(state.anim * 14) * 0.2})`;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(p.x, p.y - 6, 26 + Math.sin(state.anim * 8) * 2, 0, Math.PI * 2);
+    ctx.stroke();
+    if (Math.random() < 0.3) burst(p.x + rand(-12, 12), p.y + rand(-20, 10), ["#ff5a3d", "#ffd166"], 1, 40, { lift: 60 });
+  }
+  const n = p.spirits;
+  for (let k = 0; k < n; k += 1) {
+    const a = state.anim * 2.4 + (k * Math.PI * 2) / n;
+    const sx = p.x + Math.cos(a) * 26;
+    const sy = p.y - 8 + Math.sin(a) * 12;
+    const fading = k === n - 1 && p.spiritTimer < 2 && Math.floor(state.anim * 8) % 2 === 0;
+    ctx.globalAlpha = fading ? 0.35 : 0.9;
+    ctx.fillStyle = "#1d5a4a";
+    ctx.fillRect(sx - 5, sy - 5, 10, 10);
+    ctx.fillStyle = inRage(p) ? "#ffb08a" : SPIRIT_COLOR;
+    ctx.fillRect(sx - 4, sy - 4, 8, 8);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(sx - 2, sy - 3, 3, 3);
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- magic staffs ----------
+   Every wizard holds one staff. Staffs come in four rarities, and rarer staffs
+   shoot harder bolts. Each staff has its own special move (E, or Comma for
+   player 2). Chapter bosses always drop a staff, big bosses drop an epic or
+   legendary one, and Lulu's shop sells one too. Stand on a staff to swap it
+   with yours. Finding the same staff again merges it into a +1. */
+const STAFF_RARITY = [
+  { name: "Common", color: "#c9c9c9", mult: 1, price: 40 },
+  { name: "Rare", color: "#55aaff", mult: 1.1, price: 80 },
+  { name: "Epic", color: "#c084fc", mult: 1.2, price: 140 },
+  { name: "Legendary", color: "#f6c85f", mult: 1.3, price: 220 }
+];
+const STAFF_MAX_LEVEL = 6;
+const staffTypes = {
+  apprentice: { name: "Apprentice Staff", rarity: 0, gem: "#fff2a3", wood: "#8b5a2b", move: "Spark Burst", cooldown: 6, desc: "Shoots 10 sparks out all around you." },
+  cactus: { name: "Cactus Staff", rarity: 0, gem: "#7bd35a", wood: "#3f8f4a", move: "Spike Ring", cooldown: 7, desc: "A ring of needles flies out and pins enemies in place." },
+  bouncy: { name: "Bouncy Staff", rarity: 1, gem: "#ff9ff3", wood: "#b0527e", move: "Bounce Ball", cooldown: 8, desc: "A big rubber ball bounces off the walls and bonks everything it hits." },
+  frostbite: { name: "Frostbite Staff", rarity: 1, gem: "#9be7ff", wood: "#5f8fa8", move: "Ice Wall", cooldown: 10, desc: "Raises a wall of ice in front of you that stops enemy shots." },
+  bone: { name: "Bone Staff", rarity: 2, gem: "#e8e2cf", wood: "#bdb59c", move: "Skeleton Pals", cooldown: 14, desc: "Two little skeletons pop out of the ground and fight for you." },
+  vampire: { name: "Vampire Staff", rarity: 2, gem: "#e0457f", wood: "#3a1f2e", move: "Bat Frenzy", cooldown: 10, desc: "A swarm of bats chases enemies. Every bite heals you a little." },
+  ghost: { name: "Ghost Staff", rarity: 2, gem: "#c9d3ff", wood: "#6b6f8f", move: "Ghost Step", cooldown: 7, desc: "Zip forward as a ghost and stun everything you pass through." },
+  star: { name: "Star Staff", rarity: 3, gem: "#ffe45c", wood: "#2c3a7a", move: "Starfall", cooldown: 11, desc: "Falling stars crash down on up to 6 enemies." },
+  storm: { name: "Storm Staff", rarity: 3, gem: "#7dd3fc", wood: "#3d4a5c", move: "Storm Cloud", cooldown: 12, desc: "A thundercloud follows you for 6 seconds and zaps enemies nearby." }
+};
+const STAFF_IDS = Object.keys(staffTypes);
+// How likely each rarity is in each world: common, rare, epic, legendary.
+const STAFF_ODDS = [[60, 32, 8, 0], [40, 40, 18, 2], [25, 40, 28, 7], [12, 36, 38, 14], [5, 28, 44, 23]];
+
+function rank(id) {
+  return state.upgradeCounts[id] || 0;
+}
+
+function newStaff() {
+  return { id: "apprentice", level: 1 };
+}
+
+function staffInfo(staff) {
+  return (staff && staffTypes[staff.id]) || staffTypes.apprentice;
+}
+
+function staffRarity(staff) {
+  return STAFF_RARITY[staffInfo(staff).rarity];
+}
+
+function staffName(staff) {
+  return `${staffInfo(staff).name}${staff.level > 1 ? ` +${staff.level - 1}` : ""}`;
+}
+
+// Rarity and forge level both make staff bolts (and the special move) stronger.
+function staffPower(p) {
+  const staff = p.staff || newStaff();
+  return staffRarity(staff).mult * (1 + 0.12 * (staff.level - 1));
+}
+
+function specialCooldown(p) {
+  return staffInfo(p.staff).cooldown * Math.pow(0.85, rank("practice"));
+}
+
+function specialKey(p) {
+  if (p.index === 1) return ",";
+  return touch.enabled ? "the Special button" : "E";
+}
+
+function rollStaff(world, minRarity = 0) {
+  const odds = STAFF_ODDS[clamp(world, 0, STAFF_ODDS.length - 1)].map((w, i) => (i < minRarity ? 0 : w));
+  if (odds.every((w) => w === 0)) odds[3] = 1;
+  let roll = Math.random() * odds.reduce((a, b) => a + b, 0);
+  let rarity = 0;
+  while (rarity < 3 && roll >= odds[rarity]) {
+    roll -= odds[rarity];
+    rarity += 1;
+  }
+  return pick(STAFF_IDS.filter((id) => staffTypes[id].rarity === rarity));
+}
+
+function dropStaff(room, x, y, id, level = 1) {
+  if (!room.staffDrops) room.staffDrops = [];
+  const drop = { id, level, x: clamp(x, TILE + 30, WIDTH - TILE - 30), y: clamp(y, TILE + 40, HEIGHT - TILE - 30), t: 0, blocked: -1 };
+  room.staffDrops.push(drop);
+  const rarity = STAFF_RARITY[staffTypes[id].rarity];
+  floatText(drop.x, drop.y - 40, `${rarity.name} staff!`, rarity.color, 18);
+  burst(drop.x, drop.y, [rarity.color, "#ffffff"], 16, 180, { lift: 40 });
+  return drop;
+}
+
+// Stand on a staff for half a second to pick it up.
+function updateStaffDrops(dt) {
+  const room = currentRoom();
+  if (!room.staffDrops || !room.staffDrops.length) return;
+  for (const drop of room.staffDrops) {
+    drop.t += dt;
+    for (const p of livingPlayers()) {
+      const near = Math.hypot(p.x - drop.x, p.y - drop.y) < 28;
+      if (drop.blocked === p.index) {
+        if (!near) drop.blocked = -1;
+        continue;
+      }
+      if (!near) {
+        if (p.grabbing === drop) p.grabbing = null;
+        continue;
+      }
+      if (p.grabbing !== drop) {
+        p.grabbing = drop;
+        p.grabTime = 0;
+      }
+      p.grabTime += dt;
+      if (p.grabTime >= 0.5 && !drop.taken) {
+        takeStaff(p, drop);
+        p.grabbing = null;
+      }
+    }
+  }
+  room.staffDrops = room.staffDrops.filter((drop) => !drop.taken);
+}
+
+function takeStaff(p, drop) {
+  const who = state.twoPlayer ? `P${p.index + 1}: ` : "";
+  const info = staffTypes[drop.id];
+  const rarity = STAFF_RARITY[info.rarity];
+  if (p.staff.id === drop.id) {
+    drop.taken = true;
+    if (p.staff.level >= STAFF_MAX_LEVEL) {
+      const coins = Math.round(rarity.price / 2);
+      state.coins += coins;
+      toast(`${who}Your ${info.name} is already as strong as it gets, so the copy turned into ${coins} coins.`, 3.5);
+    } else {
+      p.staff.level = Math.min(STAFF_MAX_LEVEL, p.staff.level + drop.level);
+      banner("Staffs merged!", `${who}${staffName(p.staff)}: harder bolts and a stronger ${info.move}`, rarity.color, 2.8);
+    }
+    sfx.chime();
+  } else {
+    const old = p.staff;
+    p.staff = { id: drop.id, level: drop.level };
+    drop.id = old.id;
+    drop.level = old.level;
+    drop.blocked = p.index;
+    drop.t = 0;
+    p.specialCd = Math.min(p.specialCd, 1);
+    banner(`${rarity.name} staff!`, `${who}${info.name}: ${info.move} on ${specialKey(p)}`, rarity.color, 3);
+    toast(info.desc, 3.2);
+    sfx.fanfare();
+  }
+  burst(p.x, p.y, [rarity.color, info.gem, "#ffffff"], 20, 200);
+  state.upgradesVersion += 1;
+  saveGame();
+}
+
+function giveStaff(p, id, level = 1) {
+  const drop = { id, level, x: p.x, y: p.y, t: 0, blocked: -1 };
+  takeStaff(p, drop);
+  if (!drop.taken && !(drop.id === "apprentice" && drop.level === 1)) {
+    const room = currentRoom();
+    if (!room.staffDrops) room.staffDrops = [];
+    room.staffDrops.push(drop);
+  }
+}
+
+/* The special moves. Damage grows with bosses beaten (like spells) and with
+   the staff's rarity and forge level. */
+function useSpecial(p) {
+  if (typeof p === "number") p = players[p];
+  if (state.mode !== "playing" || p.hp <= 0 || p.stun > 0 || p.drinking > 0) return;
+  if (p.index === 1 && !state.twoPlayer) return;
+  if (p.specialCd > 0) {
+    floatText(p.x, p.y - 44, "Special not ready", "#c5a988", 13);
+    sfx.nope();
+    return;
+  }
+  const info = staffInfo(p.staff);
+  const power = 30 * spellPower() * staffPower(p);
+  const angle = aimAngle(p);
+  const id = p.staff.id;
+  if (id === "apprentice") {
+    for (let i = 0; i < 10; i += 1) {
+      const a = angle + (i / 10) * Math.PI * 2;
+      projectiles.push({ x: p.x, y: p.y, vx: Math.cos(a) * 430, vy: Math.sin(a) * 430, r: 8, damage: power * 0.6, life: 0.9, owner: "player", kind: "staff", color: info.gem, spin: 0 });
+    }
+    sfx.shoot();
+  } else if (id === "cactus") {
+    for (let i = 0; i < 14; i += 1) {
+      const a = angle + (i / 14) * Math.PI * 2;
+      projectiles.push({ x: p.x, y: p.y, vx: Math.cos(a) * 380, vy: Math.sin(a) * 380, r: 6, damage: power * 0.5, life: 0.8, owner: "player", kind: "needle", pierce: true, hits: new Set(), color: info.gem, spin: 0 });
+    }
+    noiseBurst(0.15, { volume: 0.06, freq: 3000 });
+  } else if (id === "bouncy") {
+    effects.push({ type: "bounceball", x: p.x + Math.cos(angle) * 24, y: p.y + Math.sin(angle) * 24, vx: Math.cos(angle) * 380, vy: Math.sin(angle) * 380, radius: 18, life: 4, max: 4, damage: power * 0.7, hits: new Map() });
+    sfx.pop();
+  } else if (id === "frostbite") {
+    effects.push({ type: "icewall", x: p.x + Math.cos(angle) * 70, y: p.y + Math.sin(angle) * 70, angle: angle + Math.PI / 2, half: 84, life: 5, max: 5, tick: 0, damage: power * 0.3 });
+    sfx.nova();
+  } else if (id === "bone") {
+    for (const side of [-1, 1]) {
+      const sx = clamp(p.x - Math.sin(angle) * 40 * side, TILE + 20, WIDTH - TILE - 20);
+      const sy = clamp(p.y + Math.cos(angle) * 40 * side, TILE + 20, HEIGHT - TILE - 20);
+      effects.push({ type: "skelly", x: sx, y: sy, life: 10, max: 10, cd: 0.4, damage: power * 0.35, face: 1, seed: Math.random() * 10 });
+      burst(sx, sy + 10, ["#e8e2cf", "#5b5348"], 12, 140);
+    }
+    tone(220, 0.25, { type: "square", volume: 0.05, slide: 200 });
+  } else if (id === "vampire") {
+    for (let i = 0; i < 6; i += 1) {
+      const a = angle + (i - 2.5) * 0.35;
+      projectiles.push({ x: p.x, y: p.y - 6, vx: Math.cos(a) * 300, vy: Math.sin(a) * 300, r: 9, damage: power * 0.45, life: 2.2, owner: "player", kind: "bat", homing: true, lifesteal: p.index, color: info.gem, spin: Math.random() * 6 });
+    }
+    tone(900, 0.2, { type: "sawtooth", volume: 0.04, slide: 600 });
+  } else if (id === "ghost") {
+    ghostStep(p, angle, power);
+  } else if (id === "star") {
+    const foes = nearestFoes(p.x, p.y, 560, 6);
+    if (!foes.length) {
+      floatText(p.x, p.y - 44, "No enemies to hit", "#c5a988", 13);
+      sfx.nope();
+      return;
+    }
+    foes.forEach((enemy, i) => {
+      const life = 0.55 + i * 0.12;
+      effects.push({ type: "starfall", x: enemy.x, y: enemy.y, radius: 48, life, max: life, damage: power * 1.1 });
+    });
+    tone(1320, 0.3, { type: "sine", volume: 0.05, slide: -600 });
+  } else if (id === "storm") {
+    effects.push({ type: "stormcloud", x: p.x, y: p.y, owner: p.index, radius: 240, life: 6, max: 6, tick: 0.2, damage: power * 0.45 });
+    noiseBurst(0.3, { volume: 0.08, freq: 1500 });
+  }
+  p.specialCd = specialCooldown(p);
+  p.specialMax = p.specialCd;
+  floatText(p.x, p.y - 46, `${info.move}!`, info.gem, 16);
+}
+
+// Ghost Step: glide forward through enemies, stunning each one.
+function ghostStep(p, angle, power) {
+  const fromX = p.x;
+  const fromY = p.y;
+  const doors = { up: false, down: false, left: false, right: false };
+  for (let d = 0; d < 220; d += 8) {
+    const nx = p.x + Math.cos(angle) * 8;
+    const ny = p.y + Math.sin(angle) * 8;
+    if (!positionValid(nx, ny, p.r, doors)) break;
+    p.x = nx;
+    p.y = ny;
+  }
+  pushOutOfCrates(p, p.r);
+  p.invulnerable = Math.max(p.invulnerable, 0.5);
+  effects.push({ type: "ghostline", x: fromX, y: fromY, tx: p.x, ty: p.y, life: 0.45, max: 0.45 });
+  const len = Math.hypot(p.x - fromX, p.y - fromY) || 1;
+  for (const enemy of livingFoes(currentRoom())) {
+    if (enemy.friendly) continue;
+    const t = clamp(((enemy.x - fromX) * (p.x - fromX) + (enemy.y - fromY) * (p.y - fromY)) / (len * len), 0, 1);
+    const cx = fromX + (p.x - fromX) * t;
+    const cy = fromY + (p.y - fromY) * t;
+    if (Math.hypot(enemy.x - cx, enemy.y - cy) > 30 + enemy.size / 2) continue;
+    stunEnemy(enemy, enemy.isBoss ? 1 : 2);
+    damageEnemy(enemy, power * 0.9, "staff");
+  }
+  tone(500, 0.3, { type: "sine", volume: 0.06, slide: 700 });
+}
+
+function distanceToWall(effect, x, y) {
+  const ax = effect.x - Math.cos(effect.angle) * effect.half;
+  const ay = effect.y - Math.sin(effect.angle) * effect.half;
+  const bx = effect.x + Math.cos(effect.angle) * effect.half;
+  const by = effect.y + Math.sin(effect.angle) * effect.half;
+  const t = clamp(((x - ax) * (bx - ax) + (y - ay) * (by - ay)) / (effect.half * effect.half * 4), 0, 1);
+  return Math.hypot(x - (ax + (bx - ax) * t), y - (ay + (by - ay) * t));
+}
+
+function updateStaffEffect(effect, dt) {
+  if (effect.type === "bounceball") {
+    effect.x += effect.vx * dt;
+    effect.y += effect.vy * dt;
+    const r = effect.radius;
+    if (effect.x < TILE + r || effect.x > WIDTH - TILE - r) {
+      effect.vx *= -1;
+      effect.x = clamp(effect.x, TILE + r, WIDTH - TILE - r);
+      sfx.pop();
+    }
+    if (effect.y < TILE + r || effect.y > HEIGHT - TILE - r) {
+      effect.vy *= -1;
+      effect.y = clamp(effect.y, TILE + r, HEIGHT - TILE - r);
+      sfx.pop();
+    }
+    for (const crate of currentRoom().crates) {
+      if (crate.hp > 0 && circleHitsRect(effect.x, effect.y, r, crate)) {
+        const cx = crate.x + crate.w / 2;
+        const cy = crate.y + crate.h / 2;
+        if (Math.abs(effect.x - cx) > Math.abs(effect.y - cy)) effect.vx = Math.abs(effect.vx) * Math.sign(effect.x - cx);
+        else effect.vy = Math.abs(effect.vy) * Math.sign(effect.y - cy);
+      }
+    }
+    for (const enemy of livingFoes(currentRoom())) {
+      if (enemy.friendly || Math.hypot(enemy.x - effect.x, enemy.y - effect.y) > r + enemy.size / 2) continue;
+      if ((effect.hits.get(enemy) || 0) > state.clock) continue;
+      effect.hits.set(enemy, state.clock + 0.4);
+      damageEnemy(enemy, effect.damage, "staff");
+      burst(effect.x, effect.y, ["#ff9ff3", "#ffffff"], 6, 140);
+    }
+  } else if (effect.type === "icewall") {
+    for (const projectile of projectiles) {
+      if (projectile.owner !== "enemy" || projectile.life <= 0) continue;
+      if (distanceToWall(effect, projectile.x, projectile.y) < 14 + projectile.r) {
+        projectile.life = 0;
+        burst(projectile.x, projectile.y, ["#ffffff", "#9be7ff"], 4, 90);
+      }
+    }
+    effect.tick -= dt;
+    if (effect.tick <= 0) {
+      effect.tick = 0.5;
+      for (const enemy of livingFoes(currentRoom())) {
+        if (enemy.friendly || distanceToWall(effect, enemy.x, enemy.y) > 20 + enemy.size / 2) continue;
+        enemy.slowUntil = Math.max(enemy.slowUntil, state.clock + 1.5);
+        damageEnemy(enemy, effect.damage, "frost");
+      }
+    }
+  } else if (effect.type === "skelly") {
+    const [foe] = nearestFoes(effect.x, effect.y, 700, 1);
+    effect.cd -= dt;
+    if (!foe) return;
+    const dx = foe.x - effect.x;
+    const dy = foe.y - effect.y;
+    const d = Math.hypot(dx, dy) || 1;
+    effect.face = dx < 0 ? -1 : 1;
+    if (d > 22 + foe.size / 2) {
+      effect.x += (dx / d) * 150 * dt;
+      effect.y += (dy / d) * 150 * dt;
+    } else if (effect.cd <= 0) {
+      effect.cd = 0.6;
+      damageEnemy(foe, effect.damage, "staff");
+      burst(foe.x, foe.y, ["#e8e2cf", "#ffffff"], 4, 100);
+    }
+  } else if (effect.type === "stormcloud") {
+    const owner = players[effect.owner];
+    if (owner && owner.hp > 0) {
+      effect.x += (owner.x - effect.x) * Math.min(1, dt * 6);
+      effect.y += (owner.y - effect.y) * Math.min(1, dt * 6);
+    }
+    effect.tick -= dt;
+    if (effect.tick > 0) return;
+    effect.tick = 0.5;
+    const [foe] = nearestFoes(effect.x, effect.y, effect.radius, 1);
+    if (!foe) return;
+    effects.push({ type: "bolt", points: [{ x: effect.x, y: effect.y - 70 }, { x: foe.x, y: foe.y }], life: 0.2, max: 0.2 });
+    damageEnemy(foe, effect.damage, "zap");
+    if (Math.random() < 0.4) sfx.zap();
+  }
+}
+
+function starImpact(effect) {
+  addRing(effect.x, effect.y, effect.radius, "#ffe45c", 0.3, 8);
+  burst(effect.x, effect.y, ["#ffe45c", "#ffffff", "#fff27a"], 16, 220);
+  addShake(3);
+  for (const enemy of livingFoes(currentRoom())) {
+    if (enemy.friendly || Math.hypot(enemy.x - effect.x, enemy.y - effect.y) > effect.radius + enemy.size / 2) continue;
+    damageEnemy(enemy, effect.damage, "zap");
+  }
+  tone(880, 0.15, { type: "triangle", volume: 0.05 });
+}
+
+/* ---------- drawing staffs ---------- */
+
+// A staff lying on the floor (or in a shop or hotbar slot): wood, a gem and a glow.
+function drawStaffIcon(g, x, y, id, scale = 1, level = 1) {
+  const info = staffTypes[id] || staffTypes.apprentice;
+  const rarity = STAFF_RARITY[info.rarity];
+  g.save();
+  g.translate(x, y);
+  g.scale(scale, scale);
+  g.fillStyle = rarity.color;
+  g.globalAlpha = 0.25 + Math.sin(state.anim * 4) * 0.08;
+  g.beginPath();
+  g.arc(0, 0, 18, 0, Math.PI * 2);
+  g.fill();
+  g.globalAlpha = 1;
+  g.rotate(-Math.PI / 4);
+  g.fillStyle = "#1a120c";
+  g.fillRect(-3, -14, 6, 30);
+  g.fillStyle = info.wood;
+  g.fillRect(-2, -13, 4, 28);
+  if (id === "cactus") {
+    g.fillStyle = "#2f6b37";
+    g.fillRect(-6, -2, 4, 3);
+    g.fillRect(2, 5, 4, 3);
+  } else if (id === "bone") {
+    g.fillStyle = "#e8e2cf";
+    g.fillRect(-5, 13, 10, 4);
+  } else if (id === "storm") {
+    g.fillStyle = "#ffe45c";
+    g.fillRect(-1, -6, 2, 10);
+  }
+  g.fillStyle = "#1a120c";
+  g.fillRect(-6, -22, 12, 12);
+  g.fillStyle = info.gem;
+  g.fillRect(-5, -21, 10, 10);
+  g.fillStyle = "rgba(255, 255, 255, 0.7)";
+  g.fillRect(-3, -19, 3, 3);
+  g.restore();
+  if (level > 1) outlinedText(`+${level - 1}`, x + 14 * scale, y + 14 * scale, { size: Math.round(12 * Math.max(0.9, scale)), align: "center", color: "#f6c85f", font: DISPLAY_FONT });
+}
+
+function drawStaffDrops(room) {
+  if (!room.staffDrops) return;
+  for (const drop of room.staffDrops) {
+    const info = staffTypes[drop.id];
+    const rarity = STAFF_RARITY[info.rarity];
+    const bob = Math.sin(state.anim * 3 + drop.x) * 3;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+    ctx.fillRect(drop.x - 12, drop.y + 16, 24, 4);
+    if (info.rarity >= 2 && Math.random() < 0.15) burst(drop.x + rand(-14, 14), drop.y + rand(-20, 10), [rarity.color, "#ffffff"], 1, 30, { lift: 30 });
+    drawStaffIcon(ctx, drop.x, drop.y - 4 + bob, drop.id, 1.1, drop.level);
+    outlinedText(staffName(drop), clamp(drop.x, 90, WIDTH - 90), drop.y - 34 + bob, { size: 13, align: "center", color: rarity.color, font: DISPLAY_FONT });
+    for (const p of activePlayers()) {
+      if (p.grabbing !== drop || p.hp <= 0) continue;
+      ctx.strokeStyle = rarity.color;
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(drop.x, drop.y - 4, 26, -Math.PI / 2, -Math.PI / 2 + clamp(p.grabTime / 0.5, 0, 1) * Math.PI * 2);
+      ctx.stroke();
+    }
+  }
+}
+
+// Rare and better staffs give their wizard a glowing ring underfoot.
+function drawStaffAura(p) {
+  const info = staffInfo(p.staff);
+  if (info.rarity < 1) return;
+  const rarity = STAFF_RARITY[info.rarity];
+  ctx.globalAlpha = 0.35 + Math.sin(state.anim * 5) * 0.1;
+  ctx.strokeStyle = rarity.color;
+  ctx.lineWidth = 2 + info.rarity;
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y + 17, 18, 6, 0, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.globalAlpha = 1;
+  if (info.rarity >= 2 && Math.random() < 0.08 * info.rarity) burst(p.x + rand(-14, 14), p.y + 14, [rarity.color, info.gem], 1, 30, { lift: 40 });
+}
+
+function drawStaffEffect(effect) {
+  const fade = clamp(effect.life / 0.4, 0, 1);
+  if (effect.type === "bounceball") {
+    ctx.globalAlpha = fade;
+    ctx.fillStyle = "rgba(0, 0, 0, 0.2)";
+    ctx.beginPath();
+    ctx.ellipse(effect.x, effect.y + effect.radius, effect.radius, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#b0527e";
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.radius + 2, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ff9ff3";
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(effect.x - 8, effect.y - 9, 6, 6);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillRect(effect.x - effect.radius, effect.y - 2, effect.radius * 2, 4);
+  } else if (effect.type === "icewall") {
+    ctx.globalAlpha = fade;
+    const blocks = 7;
+    for (let i = 0; i < blocks; i += 1) {
+      const t = (i / (blocks - 1)) * 2 - 1;
+      const bx = effect.x + Math.cos(effect.angle) * effect.half * t;
+      const by = effect.y + Math.sin(effect.angle) * effect.half * t;
+      const hgt = 22 + (i % 2) * 8;
+      ctx.fillStyle = "#4b8fb0";
+      ctx.fillRect(bx - 13, by - hgt + 6, 26, hgt + 6);
+      ctx.fillStyle = "#bdf1ff";
+      ctx.fillRect(bx - 11, by - hgt + 8, 22, hgt + 2);
+      ctx.fillStyle = "rgba(255, 255, 255, 0.8)";
+      ctx.fillRect(bx - 8, by - hgt + 10, 5, hgt - 6);
+    }
+  } else if (effect.type === "skelly") {
+    ctx.globalAlpha = Math.min(1, fade * 1.5, (effect.max - effect.life) / 0.3);
+    const hop = Math.abs(Math.sin(state.anim * 9 + effect.seed)) * 3;
+    drawFoeBody(ctx, 1, effect.x, effect.y - hop, 22, state.anim + effect.seed, { x: effect.face, y: 0 });
+    ctx.fillStyle = "#7ee36f";
+    ctx.fillRect(effect.x - 3, effect.y - 24 - hop, 6, 4);
+  } else if (effect.type === "stormcloud") {
+    ctx.globalAlpha = fade * 0.9;
+    const cy = effect.y - 70;
+    for (const [ox, oy, r] of [[-22, 4, 16], [0, -4, 20], [22, 4, 16], [10, 8, 14], [-10, 8, 14]]) {
+      ctx.fillStyle = "#3d4a5c";
+      ctx.beginPath();
+      ctx.arc(effect.x + ox, cy + oy, r, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.fillStyle = "#5c6b80";
+    ctx.beginPath();
+    ctx.arc(effect.x - 4, cy - 8, 12, 0, Math.PI * 2);
+    ctx.fill();
+    if (Math.random() < 0.3) {
+      ctx.fillStyle = "#7dd3fc";
+      ctx.fillRect(effect.x + rand(-20, 20), cy + 22, 2, 8);
+    }
+  } else if (effect.type === "ghostline") {
+    ctx.globalAlpha = (effect.life / effect.max) * 0.7;
+    ctx.strokeStyle = "#c9d3ff";
+    ctx.lineWidth = 22;
+    ctx.beginPath();
+    ctx.moveTo(effect.x, effect.y);
+    ctx.lineTo(effect.tx, effect.ty);
+    ctx.stroke();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 6;
+    ctx.stroke();
+  } else if (effect.type === "starfall") {
+    const left = effect.life / effect.max;
+    ctx.globalAlpha = 0.25 + (1 - left) * 0.35;
+    ctx.strokeStyle = "#ffe45c";
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.globalAlpha = 1;
+    if (left < 0.7) {
+      const h = (left / 0.7) * 360;
+      ctx.strokeStyle = "rgba(255, 228, 92, 0.5)";
+      ctx.lineWidth = 6;
+      ctx.beginPath();
+      ctx.moveTo(effect.x + h * 0.3 + 30, effect.y - h - 40);
+      ctx.lineTo(effect.x + h * 0.3, effect.y - h);
+      ctx.stroke();
+      drawStar(ctx, effect.x + h * 0.3, effect.y - h, 14, "#ffe45c");
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+/* ---------- Lulu's shop and forge ----------
+   Lulu the Llama sets up her stall next to every campfire (and by the Spirit
+   Tree after waves 5, 15 and 25). Walk up to her with no enemies around to
+   spend coins on a staff, a forge upgrade, a golden flask, a spirit charm or
+   a power-up scroll. */
+const LULU_LINES = [
+  "Welcome, wizard! Shiny things for shiny coins.",
+  "Spit-tacular deals today!",
+  "A llama never forgets a good customer.",
+  "Careful, the forge is hot!",
+  "Fresh staffs! Only slightly chewed."
+];
+
+function shopSpot(room) {
+  if (room.tree) return { x: WIDTH / 2 + 170, y: HEIGHT / 2 - 150 };
+  const fire = campfireSpot(room);
+  return { x: fire.x + (fire.x < WIDTH / 2 ? 120 : -120), y: fire.y - 6 };
+}
+
+function hasShop(room) {
+  if (room.tree) return Boolean(state.tree && state.tree.shop);
+  return hasCampfire(room);
+}
+
+function updateShopStall(p) {
+  const room = currentRoom();
+  if (!hasShop(room)) return;
+  const stall = shopSpot(room);
+  const near = Math.hypot(p.x - stall.x, p.y - (stall.y + 30)) < 46;
+  if (!near) {
+    p.shopHere = false;
+    return;
+  }
+  if (p.shopHere) return;
+  if (livingFoes(room).some((enemy) => !enemy.friendly)) {
+    if (state.time > p.fireWarn) {
+      toast("Lulu won't open her stall with enemies around!", 1.8);
+      p.fireWarn = state.time + 3;
+    }
+    return;
+  }
+  openShop(p);
+}
+
+function openShop(p = player) {
+  const room = currentRoom();
+  p.shopHere = true;
+  if (!room.shopStock) {
+    const world = room.tree ? Math.min(4, Math.floor((state.tree ? state.tree.wave : 0) / 6)) : roomRow(room);
+    room.shopStock = { staff: rollStaff(world), sold: false };
+  }
+  state.shopper = p.index;
+  state.shopLine = pick(LULU_LINES);
+  state.mode = "shop";
+  mouse.down = false;
+  touch.fire = false;
+  tone(520, 0.12, { type: "triangle", volume: 0.05 });
+  tone(780, 0.12, { type: "triangle", volume: 0.05, delay: 0.1 });
+}
+
+function closeShop() {
+  state.mode = "playing";
+  mouse.down = false;
+  saveGame();
+}
+
+function forgePrice(staff) {
+  return Math.round((35 + 25 * (staff.level - 1)) * (1 + 0.5 * staffInfo(staff).rarity));
+}
+
+function shopItems() {
+  const room = currentRoom();
+  const stock = room.shopStock || { staff: "apprentice", sold: true };
+  const p = players[state.shopper] || player;
+  const info = staffTypes[stock.staff];
+  const rarity = STAFF_RARITY[info.rarity];
+  const level = p.staff.level;
+  const maxed = level >= STAFF_MAX_LEVEL;
+  return [
+    {
+      name: stock.sold ? "Sold out!" : info.name,
+      sub: stock.sold ? "Lulu has a new staff at the next campfire." : `${rarity.name} · ${info.move}: ${info.desc}`,
+      color: stock.sold ? "#8a7a68" : rarity.color,
+      icon: { staff: stock.staff },
+      price: rarity.price,
+      ok: !stock.sold,
+      buy: () => {
+        stock.sold = true;
+        giveStaff(p, stock.staff);
+      }
+    },
+    {
+      name: maxed ? "Forge: staff maxed out" : `Forge: ${staffName(p.staff)} to +${level}`,
+      sub: maxed ? "This staff is as strong as it gets." : "Bolts and the special move get 12% stronger.",
+      color: "#ff9b3d",
+      icon: { forge: true },
+      price: forgePrice(p.staff),
+      ok: !maxed,
+      buy: () => {
+        p.staff.level += 1;
+        banner("Forged!", `${staffName(p.staff)} is stronger`, "#ff9b3d", 2.2);
+        state.upgradesVersion += 1;
+        noiseBurst(0.2, { volume: 0.1, freq: 2500 });
+      }
+    },
+    {
+      name: "Golden Flask",
+      sub: `+1 healing flask for the rest of this run (${state.shopFlasks} of 2 bought).`,
+      color: "#ef5b4b",
+      icon: { flask: true },
+      price: 120,
+      ok: state.shopFlasks < 2,
+      buy: () => {
+        state.shopFlasks += 1;
+        stats.maxFlasks += 1;
+        for (const q of players) q.flasks += 1;
+      }
+    },
+    {
+      name: "Spirit Charm",
+      sub: state.charm ? "You already wear one." : "Hold 1 more spirit orb for the rest of this run.",
+      color: SPIRIT_COLOR,
+      icon: { charm: true },
+      price: 70,
+      ok: !state.charm,
+      buy: () => {
+        state.charm = true;
+      }
+    },
+    {
+      name: "Power-up Scroll",
+      sub: "Pick a new power-up card right now. Costs more each time.",
+      color: "#c084fc",
+      icon: { scroll: true },
+      price: 100 + 50 * state.scrolls,
+      ok: true,
+      buy: () => {
+        state.scrolls += 1;
+        state.scrollPick = true;
+        state.mode = "playing";
+        openUpgrade();
+      }
+    }
+  ];
+}
+
+function buyShopItem(index) {
+  const item = shopItems()[index];
+  if (!item) return;
+  if (!item.ok) {
+    sfx.nope();
+    return;
+  }
+  if (state.coins < item.price) {
+    toast("Not enough coins!", 1.4);
+    sfx.nope();
+    return;
+  }
+  state.coins -= item.price;
+  sfx.coin(4);
+  sfx.chime();
+  item.buy();
+  saveGame();
+}
+
+// Lulu, drawn from blocks: fluffy cream llama, red blanket, tiny hat.
+function drawLlama(g, x, y, s, t) {
+  const u = s / 16;
+  const chew = Math.floor(t * 4) % 2;
+  const blink = t % 4 < 0.15;
+  g.save();
+  g.translate(x, y);
+  const block = (bx, by, w, h, color) => {
+    g.fillStyle = color;
+    g.fillRect(Math.round(bx * u), Math.round(by * u), Math.ceil(w * u), Math.ceil(h * u));
+  };
+  block(-7, 6, 14, 2, "rgba(0,0,0,0.25)");
+  for (const lx of [-6, -3, 2, 5]) block(lx, 1, 2, 6, "#d8c7a2");
+  block(-7, -4, 13, 7, "#2a1d12");
+  block(-6.5, -3.5, 12, 6, "#f3e6c8");
+  block(-4, -4.5, 7, 4, "#e0457f");
+  block(-4, -2, 7, 1, "#ffd166");
+  block(3, -12, 4, 10, "#2a1d12");
+  block(3.5, -11.5, 3, 9, "#f3e6c8");
+  block(3, -16, 7, 5, "#2a1d12");
+  block(3.5, -15.5, 6, 4, "#f3e6c8");
+  block(3.6, -19, 1.5, 3.5, "#f3e6c8");
+  block(6.5, -19, 1.5, 3.5, "#f3e6c8");
+  block(8, -13.6 + chew * 0.3, 2.4, 1.6, "#c9a882");
+  block(6.6, -14.4, 1.2, blink ? 0.4 : 1.2, "#120c08");
+  block(3, -20.5, 6, 1.5, "#3b82f6");
+  block(4, -22.5, 4, 2, "#3b82f6");
+  block(4, -21, 4, 0.6, "#ffd166");
+  block(-8, -3, 2, 3, "#f3e6c8");
+  g.restore();
+}
+
+function drawShopStall(room) {
+  const { x, y } = shopSpot(room);
+  ctx.fillStyle = "rgba(0, 0, 0, 0.25)";
+  ctx.fillRect(x - 44, y + 34, 88, 8);
+  drawLlama(ctx, x + 6, y + 18, 40, state.anim);
+  ctx.fillStyle = "#4a2d1a";
+  ctx.fillRect(x - 42, y + 12, 84, 24);
+  ctx.fillStyle = "#8a5a2b";
+  ctx.fillRect(x - 40, y + 14, 80, 8);
+  ctx.fillStyle = "#6b4226";
+  ctx.fillRect(x - 40, y + 22, 80, 12);
+  for (let i = 0; i < 4; i += 1) {
+    ctx.fillStyle = i % 2 === 0 ? "#e0457f" : "#fff3d6";
+    ctx.fillRect(x - 44 + i * 22, y - 40, 22, 12);
+  }
+  ctx.fillStyle = "#4a2d1a";
+  ctx.fillRect(x - 42, y - 28, 4, 42);
+  ctx.fillRect(x + 38, y - 28, 4, 42);
+  ctx.fillStyle = "#f6c85f";
+  ctx.fillRect(x - 30, y + 8, 7, 6);
+  ctx.fillStyle = "#9be7ff";
+  ctx.fillRect(x - 20, y + 7, 6, 7);
+  const near = activePlayers().some((p) => p.hp > 0 && Math.hypot(p.x - x, p.y - (y + 30)) < 90);
+  outlinedText(near ? "Lulu's Stall: walk in!" : "Lulu's Stall", x, y + 52, { size: 12, align: "center", color: "#ffd166" });
+}
+
+function drawShopIcon(icon, x, y) {
+  if (icon.staff) {
+    drawStaffIcon(ctx, x, y + 4, icon.staff, 1);
+  } else if (icon.forge) {
+    ctx.fillStyle = "#3d434c";
+    ctx.fillRect(x - 16, y + 2, 32, 10);
+    ctx.fillRect(x - 10, y + 12, 20, 8);
+    ctx.fillStyle = "#5d6470";
+    ctx.fillRect(x - 20, y - 4, 36, 8);
+    ctx.fillStyle = "#ff9b3d";
+    ctx.fillRect(x - 4, y - 16, 8, 10);
+    ctx.fillStyle = "#ffd166";
+    ctx.fillRect(x - 2, y - 12, 4, 6);
+  } else if (icon.flask) {
+    drawSpellIcon("estus", x, y + 2, "#f6c85f", 0.8);
+  } else if (icon.charm) {
+    ctx.strokeStyle = "#c5a988";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(x, y - 6, 12, Math.PI, 0);
+    ctx.stroke();
+    ctx.fillStyle = "#1d5a4a";
+    ctx.fillRect(x - 9, y - 4, 18, 18);
+    ctx.fillStyle = SPIRIT_COLOR;
+    ctx.fillRect(x - 7, y - 2, 14, 14);
+    ctx.fillStyle = "#ffffff";
+    ctx.fillRect(x - 4, y, 4, 4);
+  } else if (icon.scroll) {
+    ctx.fillStyle = "#c9a882";
+    ctx.fillRect(x - 14, y - 12, 28, 26);
+    ctx.fillStyle = "#f3e6c8";
+    ctx.fillRect(x - 12, y - 10, 24, 22);
+    ctx.fillStyle = "#8a5a2b";
+    ctx.fillRect(x - 16, y - 14, 32, 5);
+    ctx.fillRect(x - 16, y + 12, 32, 5);
+    ctx.fillStyle = "#c084fc";
+    ctx.fillRect(x - 6, y - 5, 12, 3);
+    ctx.fillRect(x - 6, y + 1, 12, 3);
+  }
+}
+
+function drawShopScreen() {
+  dim(0.65);
+  const x0 = 100;
+  const w = WIDTH - 200;
+  drawPanel(x0, 56, w, 532);
+  drawLlama(ctx, x0 + 70, 136, 64, state.anim);
+  outlinedText("Lulu's Stall", x0 + 130, 104, { size: 34, font: DISPLAY_FONT, color: "#ffd166" });
+  outlinedText(`"${state.shopLine || LULU_LINES[0]}"`, x0 + 130, 132, { size: 15, color: "#f8ead2" });
+  ctx.fillStyle = "#8a5f12";
+  ctx.fillRect(x0 + w - 150, 84, 20, 20);
+  ctx.fillStyle = "#f6c85f";
+  ctx.fillRect(x0 + w - 148, 86, 16, 16);
+  outlinedText(String(state.coins), x0 + w - 122, 102, { size: 22, font: DISPLAY_FONT, color: "#f6c85f" });
+  if (state.twoPlayer) outlinedText(`Shopping: P${state.shopper + 1}`, x0 + w - 30, 130, { size: 14, align: "right", color: "#c5a988" });
+
+  const items = shopItems();
+  items.forEach((item, i) => {
+    const y = 156 + i * 66;
+    const afford = state.coins >= item.price;
+    const hover = isHover(x0 + 20, y, w - 40, 58);
+    ctx.fillStyle = hover && item.ok ? "rgba(74, 56, 41, 0.95)" : "rgba(36, 28, 23, 0.95)";
+    ctx.fillRect(x0 + 20, y, w - 40, 58);
+    ctx.strokeStyle = item.ok ? item.color : "#3a2e25";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(x0 + 21, y + 1, w - 42, 56);
+    outlinedText(String(i + 1), x0 + 38, y + 36, { size: 20, font: DISPLAY_FONT, color: "#c5a988" });
+    drawShopIcon(item.icon, x0 + 86, y + 26);
+    // Long staff descriptions get a second, smaller line instead of being cut off.
+    const lines = wrapLines(item.sub, w - 340, `600 13px ${BODY_FONT}`);
+    const two = lines.length > 1;
+    outlinedText(item.name, x0 + 120, y + (two ? 19 : 24), { size: 18, font: DISPLAY_FONT, color: item.ok ? item.color : "#8a7a68" });
+    const shown = two ? wrapLines(item.sub, w - 340, `600 12px ${BODY_FONT}`).slice(0, 2) : lines;
+    shown.forEach((line, k) => outlinedText(line, x0 + 120, y + (two ? 36 + k * 14 : 45), { size: two ? 12 : 13, weight: 600, color: "#e6d6bd" }));
+    drawButton(item.ok ? `${item.price} coins` : "-", x0 + w - 170, y + 10, 140, 38, () => buyShopItem(i), { disabled: !item.ok || !afford, size: 16, primary: item.ok && afford });
+    if (item.ok) hitRegions.push({ x: x0 + 20, y, w: w - 210, h: 58, action: () => buyShopItem(i) });
+  });
+  drawButton("Leave (Esc)", WIDTH / 2 - 110, 500, 220, 46, closeShop, { size: 18 });
+  outlinedText(touch.enabled ? "Tap a price to buy" : "Press 1 to 5 to buy  ·  Esc leaves", WIDTH / 2, 572, { size: 14, align: "center", color: "#c5a988" });
+}
+
+/* ---------- Spirit Tree defense ----------
+   A separate mode from the title screen. A big tree stands in the middle of
+   a grove and monsters come in 30 waves to knock it down. Most of them go
+   for the tree unless a wizard gets close. Boss waves at 5, 10, 15, 20, 25
+   and 30 (the Crystal Colossus). Between waves the tree heals a little, a
+   gift drops, every third wave gives a power-up, and Lulu visits after
+   waves 5, 15 and 25. Spells unlock and enemies grow as the waves go up. */
+const TREE_BOSS_WAVES = { 5: "shooter", 10: "sword", 15: "shooter", 20: "big", 25: "sword", 30: "colossus" };
+const TREE_SHOP_WAVES = [5, 15, 25];
+
+function startTreeMode() {
+  resetWorld();
+  state.treeMode = true;
+  state.petUnlocked = true;
+  const maxHp = Math.round(500 * coopScale(1.3));
+  state.tree = { x: WIDTH / 2, y: HEIGHT / 2 - 10, hp: maxHp, maxHp, wave: 0, phase: "break", timer: 4, queue: [], spawnTimer: 0, flash: 0, shop: false, trunk: null, fallen: false };
+  const start = { x: WIDTH / 2, y: HEIGHT / 2 + 120 };
+  placePlayers(start.x, start.y);
+  pet = { x: start.x - 40, y: start.y + 10, timer: 1, face: 1, hop: 0 };
+  state.mode = "playing";
+  enterRoom(TREE_ROOM, start, true);
+  state.tree.trunk = currentRoom().crates.find((crate) => crate.tree);
+  banner("Spirit Tree", `Protect the tree from ${TREE_WAVES} waves of monsters!`, "#7dffb0", 3.2);
+  toast("Monsters go for the tree. Get close to one and it turns on you instead!", 4);
+}
+
+function togglePlayMode() {
+  state.playMode = state.playMode === "tree" ? "dungeon" : "tree";
+  savePrefs();
+}
+
+function startChosenMode() {
+  if (state.playMode === "tree") startTreeMode();
+  else if (state.hasSave) loadGame() || startNewGame();
+  else startNewGame();
+}
+
+// Regular monsters go for the tree unless a wizard is close by.
+function foeTarget(enemy) {
+  const near = nearestPlayer(enemy.x, enemy.y);
+  if (!state.treeMode || !state.tree) return near;
+  if (near.hp > 0 && Math.hypot(near.x - enemy.x, near.y - enemy.y) < 160) return near;
+  const tree = state.tree;
+  return { x: tree.x, y: tree.y, velX: 0, velY: 0, r: 40 };
+}
+
+function hurtTree(amount, x, y) {
+  const tree = state.tree;
+  if (!tree || tree.fallen || state.mode !== "playing") return;
+  const damage = Math.max(1, Math.round(amount));
+  tree.hp = Math.max(0, tree.hp - damage);
+  tree.flash = 0.2;
+  floatText(x, y - 10, `-${damage}`, "#9ee49c", 14);
+  burst(x, y, ["#3fae5f", "#7dffd4"], 4, 90);
+  if (tree.hp <= 0) treeFallen();
+}
+
+function treeFallen() {
+  const tree = state.tree;
+  tree.fallen = true;
+  state.lastLost = 0;
+  state.mode = "dead";
+  mouse.down = false;
+  touch.fire = false;
+  touch.block = false;
+  addShake(14);
+  burst(tree.x, tree.y - 80, ["#3fae5f", "#8a5a2b", "#7dffd4"], 50, 300);
+  sfx.sad();
+  noteBestWave(tree.wave - 1);
+}
+
+function noteBestWave(wave) {
+  if (wave > state.bestWave) {
+    state.bestWave = wave;
+    savePrefs();
+  }
+}
+
+function updateTree(dt) {
+  const tree = state.tree;
+  const room = currentRoom();
+  if (!tree || !room.tree) return;
+  tree.flash = Math.max(0, tree.flash - dt);
+  if (tree.phase === "break") {
+    tree.timer -= dt;
+    if (tree.timer <= 0) startWave(tree.wave + 1);
+    return;
+  }
+  if (tree.queue.length) {
+    tree.spawnTimer -= dt;
+    if (tree.spawnTimer <= 0) {
+      spawnFromQueue(room);
+      tree.spawnTimer = Math.max(0.35, 0.8 - tree.wave * 0.012);
+    }
+  } else if (!livingFoes(room).some((enemy) => !enemy.friendly)) {
+    waveCleared(room);
+  }
+}
+
+function startWave(n) {
+  const tree = state.tree;
+  const room = currentRoom();
+  tree.wave = n;
+  tree.phase = "fight";
+  tree.shop = false;
+  room.shopStock = null;
+  room.tier = Math.min(n - 1, 29);
+  // Spells unlock and enemies grow just like beating bosses in the dungeon.
+  state.bossesDefeated = n - 1;
+  room.enemies = room.enemies.filter((enemy) => enemy.hp > 0);
+  const count = Math.min(18, 4 + Math.round(n * 0.8)) + (difficulty().extra || 0);
+  const monsters = enemyTypes.map((type, i) => i).filter((i) => enemyTypes[i].monster && room.tier >= enemyTypes[i].minTier);
+  const bossKind = TREE_BOSS_WAVES[n];
+  const minions = bossKind ? Math.ceil(count / 2) : count;
+  tree.queue = [];
+  for (let i = 0; i < minions; i += 1) {
+    const typeIndex = monsters.length && Math.random() < 0.35 ? pick(monsters) : Math.floor(Math.random() * BOSS_TYPE_COUNT);
+    tree.queue.push({ type: typeIndex });
+  }
+  if (bossKind) tree.queue.splice(Math.min(2, tree.queue.length), 0, { boss: bossKind });
+  tree.spawnTimer = 0.4;
+  if (bossKind) {
+    banner(`Wave ${n}: BOSS WAVE!`, n === TREE_WAVES ? "The last wave. Hold on!" : "A boss is coming for the tree!", "#ff8b7d", 2.8);
+    sfx.boss();
+  } else {
+    banner(`Wave ${n}`, `${count} monsters are coming!`, "#7dffb0", 2);
+    sfx.door();
+  }
+}
+
+function treeSpawnSpot() {
+  let spot = { x: TILE + 40, y: HEIGHT / 2 };
+  for (let i = 0; i < 12; i += 1) {
+    const side = Math.floor(Math.random() * 4);
+    spot = side === 0 ? { x: TILE + 40, y: rand(TILE + 60, HEIGHT - TILE - 60) }
+      : side === 1 ? { x: WIDTH - TILE - 40, y: rand(TILE + 60, HEIGHT - TILE - 60) }
+      : side === 2 ? { x: rand(TILE + 60, WIDTH - TILE - 60), y: TILE + 40 }
+      : { x: rand(TILE + 60, WIDTH - TILE - 60), y: HEIGHT - TILE - 40 };
+    if (livingPlayers().every((p) => Math.hypot(p.x - spot.x, p.y - spot.y) > 200)) break;
+  }
+  return spot;
+}
+
+function spawnFromQueue(room) {
+  const entry = state.tree.queue.shift();
+  const spot = treeSpawnSpot();
+  if (entry.boss) {
+    let boss;
+    if (entry.boss === "big" || entry.boss === "colossus") {
+      const row = entry.boss === "colossus" ? ROOM_ROWS - 1 : Math.floor(Math.random() * (ROOM_ROWS - 1));
+      boss = makeBigBoss(row, room.tier);
+      boss.x = boss.homeX = clamp(spot.x, 160, WIDTH - 160);
+      boss.y = boss.homeY = clamp(spot.y, 140, HEIGHT - 140);
+    } else {
+      const type = Math.floor(Math.random() * BOSS_TYPE_COUNT);
+      boss = makeEnemy(type, spot.x, spot.y, { tier: room.tier, boss: true, roomIndex: state.tree.wave });
+      if (entry.boss === "sword") makeSwordBoss(boss, room.tier);
+      state.seenTypes.add(type);
+    }
+    boss.attackTimer = 2;
+    room.boss = boss;
+    addRing(boss.x, boss.y, 120, "#ff5a3d", 0.5, 10);
+    sfx.roar();
+    toast(`${boss.name} is here!`, 2.4);
+    return;
+  }
+  const enemy = makeEnemy(entry.type, spot.x, spot.y, { tier: room.tier });
+  enemy.attackTimer = rand(1, 2);
+  room.enemies.push(enemy);
+  if (enemyTypes[entry.type].behavior === "pack") room.enemies.push(makeEnemy(entry.type, clamp(spot.x + 34, TILE + 40, WIDTH - TILE - 40), spot.y + 10, { tier: room.tier }));
+  state.seenTypes.add(entry.type);
+  burst(spot.x, spot.y, [enemy.type.color, "#ffffff"], 8, 120);
+}
+
+function waveCleared(room) {
+  const tree = state.tree;
+  const n = tree.wave;
+  tree.phase = "break";
+  tree.timer = 4;
+  room.enemies = room.enemies.filter((enemy) => enemy.hp > 0);
+  noteBestWave(n);
+  if (n >= TREE_WAVES) {
+    treeVictory();
+    return;
+  }
+  const heal = Math.round(tree.maxHp * 0.08);
+  tree.hp = Math.min(tree.maxHp, tree.hp + heal);
+  floatText(tree.x, tree.y - 150, `Tree +${heal}`, "#7dffb0", 18);
+  // A little gift by the roots after every wave.
+  dropLoot(tree.x, tree.y + 70, "coin", 4 + Math.floor(n / 3));
+  dropLoot(tree.x, tree.y + 70, "heart", 1);
+  dropLoot(tree.x, tree.y + 70, "star", 1);
+  for (const p of activePlayers()) {
+    if (p.hp <= 0) revivePlayer(p, 0.4);
+    p.flasks = Math.min(stats.maxFlasks, p.flasks + 1);
+  }
+  let subtitle = "The tree healed a little. Next wave soon!";
+  if (n % 3 === 0) {
+    state.upgradeTimer = 1.2;
+    subtitle = "Pick a power-up!";
+  }
+  if (TREE_SHOP_WAVES.includes(n)) {
+    tree.shop = true;
+    tree.timer = 15;
+    subtitle = "Lulu set up her stall by the tree!";
+  }
+  banner(`Wave ${n} cleared!`, subtitle, "#7dffb0", 2.4);
+  sfx.chime();
+}
+
+function treeVictory() {
+  const tree = state.tree;
+  state.won = true;
+  confetti(tree.x, tree.y - 100, 140);
+  burst(tree.x, tree.y - 100, ["#7dffd4", "#3fae5f", "#ffffff"], 40, 300, { lift: 80 });
+  sfx.bigWin();
+  banner("The Spirit Tree is saved!", `All ${TREE_WAVES} waves beaten!`, "#7dffb0", 4);
+  state.victoryTimer = 4;
+}
+
+// Leaving the victory screen. Only a finished dungeon run clears the save.
+function finishVictory() {
+  if (!state.treeMode) {
+    writeStorage(SAVE_KEY, null);
+    state.hasSave = false;
+  }
+  state.mode = "title";
+}
+
+function treeBossDown(boss) {
+  const room = currentRoom();
+  addShake(12);
+  confetti(boss.x, boss.y, 70);
+  sfx.fanfare();
+  for (const projectile of projectiles) {
+    if (projectile.owner === "enemy") projectile.life = 0;
+  }
+  banner("Boss defeated!", `${boss.name} went poof!`, "#9ee49c");
+  unlockHat(boss.typeIndex + 1);
+  dropStaff(room, boss.x, boss.y + 30, rollStaff(roomRow(room), boss.melee ? 1 : 0));
+}
+
+function drawSpiritTree(tree) {
+  const { x, y } = tree;
+  const health = clamp(tree.hp / tree.maxHp, 0, 1);
+  ctx.fillStyle = `rgba(125, 255, 212, ${0.1 + Math.sin(state.anim * 2) * 0.04})`;
+  ctx.beginPath();
+  ctx.arc(x, y + 14, 96, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#4a2d1a";
+  for (const [rx, ry, rw] of [[-58, 10, 34], [26, 12, 36], [-40, 18, 20], [22, 20, 22]]) ctx.fillRect(x + rx, y + ry, rw, 8);
+  ctx.fillStyle = "#2a1a10";
+  ctx.fillRect(x - 30, y - 70, 60, 90);
+  ctx.fillStyle = tree.flash > 0 ? "#ff8b7d" : "#7a4d2a";
+  ctx.fillRect(x - 27, y - 68, 54, 86);
+  ctx.fillStyle = "#5e3a1f";
+  ctx.fillRect(x - 12, y - 60, 6, 70);
+  ctx.fillRect(x + 8, y - 40, 5, 50);
+  ctx.fillStyle = "#7dffd4";
+  ctx.fillRect(x - 6, y - 30, 12, 12);
+  ctx.fillStyle = "#ffffff";
+  ctx.fillRect(x - 3, y - 27, 4, 4);
+  const leaf = health > 0.5 ? ["#2f8a4a", "#3fae5f", "#5cc977"] : health > 0.25 ? ["#5e8a3a", "#7aa64a", "#9cc35c"] : ["#7a6a3a", "#9a8a4a", "#b8a65c"];
+  const blobs = [[0, -118, 70, 0], [-58, -92, 48, 1], [58, -92, 48, 1], [-30, -150, 44, 2], [32, -150, 44, 2], [0, -176, 34, 2]];
+  for (const [bx, by, r, shadeIndex] of blobs) {
+    ctx.fillStyle = "#14301c";
+    ctx.beginPath();
+    ctx.arc(x + bx, y + by, r + 3, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (const [bx, by, r, shadeIndex] of blobs) {
+    ctx.fillStyle = tree.flash > 0 ? "#d9776a" : leaf[shadeIndex];
+    ctx.beginPath();
+    ctx.arc(x + bx, y + by, r, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  for (let i = 0; i < 10; i += 1) {
+    const a = i * 2.4 + state.anim * 0.5;
+    const tw = Math.sin(state.anim * 3 + i) > 0.2;
+    if (!tw) continue;
+    ctx.fillStyle = i % 2 ? "#7dffd4" : "#fff6a3";
+    ctx.fillRect(x + Math.cos(a) * (30 + (i % 3) * 18) - 3, y - 125 + Math.sin(a) * 40 - 3, 6, 6);
+  }
+  if (health < 0.5 && Math.random() < 0.05) burst(x + rand(-60, 60), y - rand(90, 170), [leaf[1]], 1, 30, { gravity: 120 });
+  ctx.fillStyle = "#120c08";
+  ctx.fillRect(x - 52, y + 30, 104, 9);
+  ctx.fillStyle = health < 0.3 ? "#ff8b7d" : "#7dffb0";
+  ctx.fillRect(x - 51, y + 31, 102 * health, 7);
+}
+
+function drawTreeHud(tree) {
+  outlinedText(`Spirit Tree · Wave ${tree.wave} / ${TREE_WAVES}`, 26, 40, { size: 19, font: DISPLAY_FONT, color: "#7dffb0" });
+  ctx.fillStyle = "#120c08";
+  ctx.fillRect(26, 52, 250, 16);
+  ctx.fillStyle = tree.hp / tree.maxHp < 0.3 ? "#ff8b7d" : "#5cc977";
+  ctx.fillRect(28, 54, 246 * clamp(tree.hp / tree.maxHp, 0, 1), 12);
+  outlinedText(`Tree ${Math.ceil(tree.hp)} / ${tree.maxHp}`, 151, 65, { size: 12, align: "center", color: "#ffffff" });
+  if (tree.phase === "break" && state.mode === "playing" && !state.won) {
+    const line = tree.wave === 0 ? `First wave in ${Math.ceil(tree.timer)}` : tree.shop ? `Lulu is here! Next wave in ${Math.ceil(tree.timer)}` : `Next wave in ${Math.ceil(tree.timer)}`;
+    outlinedText(line, WIDTH / 2, 96, { size: 22, align: "center", font: DISPLAY_FONT, color: "#7dffb0" });
+  }
 }
 
 /* ---------- loot ---------- */
@@ -3357,6 +4834,116 @@ function collectPickup(item, p) {
     p.mana = Math.min(stats.maxMana, p.mana + 30);
     floatText(item.x, item.y - 8, "+30 Mana", "#9ed4ff", 15);
     sfx.heal();
+  } else if (item.kind === "spirit") {
+    gainSpirit(p);
+  }
+}
+
+/* ---------- ranked card effects ---------- */
+
+// Fire, Frost and Venom Bolts add an element to staff bolts.
+function staffBoltHit(target) {
+  if (target.hp <= 0 || target.friendly) return;
+  const fire = rank("firebolt");
+  const frost = rank("frostbolt");
+  const venom = rank("venombolt");
+  if (fire && Math.random() < 0.15 * fire) {
+    if (!isBurning(target)) target.burnTick = 0.5;
+    target.burnUntil = Math.max(target.burnUntil || 0, state.clock + 3);
+  }
+  if (frost && Math.random() < 0.1 * frost) {
+    target.slowUntil = Math.max(target.slowUntil, state.clock + 1.5);
+    target.burnUntil = 0;
+    burst(target.x, target.y, ["#ffffff", "#9be7ff"], 5, 100);
+  }
+  if (venom) {
+    target.venomUntil = state.clock + 2.5;
+    target.venomPower = venom;
+    target.poisonUntil = Math.max(target.poisonUntil || 0, state.clock + 2.5);
+  }
+}
+
+function updateVenom(enemy, dt) {
+  if (state.clock >= (enemy.venomUntil || 0)) return;
+  enemy.venomTick = (enemy.venomTick || 0.5) - dt;
+  if (enemy.venomTick > 0) return;
+  enemy.venomTick = 0.5;
+  damageEnemy(enemy, 3 * enemy.venomPower * spellPower(), "poison");
+}
+
+// Thorny Robe: whoever hits you gets pricked.
+function thornsBack(attacker) {
+  const thorns = rank("thorns");
+  if (!thorns || !attacker || attacker.hp <= 0 || attacker.friendly || !attacker.size) return;
+  burst(attacker.x, attacker.y, ["#a3e635", "#ffffff"], 6, 120);
+  damageEnemy(attacker, 12 * thorns * spellPower(), "staff");
+}
+
+// Rune Circle: a burst around each wizard every 3 seconds, cycling elements.
+const RUNE_ELEMENTS = [
+  { source: "fire", color: "#ff742e" },
+  { source: "frost", color: "#9be7ff" },
+  { source: "zap", color: "#ffe45c" }
+];
+
+function updateRune(p, dt) {
+  const level = rank("rune");
+  if (!level || p.hp <= 0) return;
+  p.runeTimer = (p.runeTimer === undefined ? 3 : p.runeTimer) - dt;
+  if (p.runeTimer > 0) return;
+  p.runeTimer = 3;
+  p.runeCount = ((p.runeCount || 0) + 1) % RUNE_ELEMENTS.length;
+  const element = RUNE_ELEMENTS[p.runeCount];
+  const radius = 90 + 15 * level;
+  effects.push({ type: "rune", x: p.x, y: p.y, radius, color: element.color, life: 0.5, max: 0.5 });
+  for (const enemy of livingFoes(currentRoom())) {
+    if (enemy.friendly || Math.hypot(enemy.x - p.x, enemy.y - p.y) > radius + enemy.size / 2) continue;
+    if (element.source === "fire") {
+      if (!isBurning(enemy)) enemy.burnTick = 0.5;
+      enemy.burnUntil = Math.max(enemy.burnUntil || 0, state.clock + 2.5);
+    } else if (element.source === "frost") {
+      enemy.slowUntil = Math.max(enemy.slowUntil, state.clock + 1.2);
+      enemy.burnUntil = 0;
+    }
+    damageEnemy(enemy, 10 * level * spellPower(), element.source);
+  }
+  tone(element.source === "fire" ? 260 : element.source === "frost" ? 1200 : 700, 0.15, { type: "triangle", volume: 0.035 });
+}
+
+function drawRune(effect) {
+  const k = 1 - effect.life / effect.max;
+  ctx.globalAlpha = Math.max(0, 1 - k);
+  ctx.strokeStyle = effect.color;
+  ctx.lineWidth = 4;
+  ctx.beginPath();
+  ctx.arc(effect.x, effect.y, effect.radius * (0.6 + k * 0.4), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(effect.x, effect.y, effect.radius * (0.45 + k * 0.4), 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.fillStyle = effect.color;
+  for (let i = 0; i < 6; i += 1) {
+    const a = state.anim + (i * Math.PI) / 3;
+    const r = effect.radius * (0.52 + k * 0.4);
+    ctx.fillRect(effect.x + Math.cos(a) * r - 4, effect.y + Math.sin(a) * r - 4, 8, 8);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Little pips and a roman numeral show a ranked card's next rank.
+function drawRankPips(upgrade, x, y, w) {
+  const owned = state.upgradeCounts[upgrade.id] || 0;
+  const size = 12;
+  const gap = 5;
+  const total = upgrade.max * size + (upgrade.max - 1) * gap;
+  let px = x + w / 2 - total / 2;
+  for (let i = 0; i < upgrade.max; i += 1) {
+    ctx.fillStyle = "#120c08";
+    ctx.fillRect(px - 1, y - 1, size + 2, size + 2);
+    ctx.fillStyle = i < owned ? upgrade.color : i === owned ? (Math.floor(state.anim * 4) % 2 ? "#f8ead2" : upgrade.color) : "#3a2e25";
+    ctx.fillRect(px, y, size, size);
+    px += size + gap;
   }
 }
 
@@ -3399,6 +4986,7 @@ function chooseUpgrade(index) {
   const upgrade = state.upgradeChoices[index];
   if (!upgrade) return;
   upgrade.apply();
+  state.scrollPick = false;
   state.upgradeCounts[upgrade.id] = (state.upgradeCounts[upgrade.id] || 0) + 1;
   state.upgradesVersion += 1;
   state.upgradeChoices = [];
@@ -3507,8 +5095,11 @@ function update(dt) {
   if (state.mode !== "playing") return;
   updatePet(worldDt);
   updateFoes(worldDt);
+  if (state.treeMode) updateTree(worldDt);
+  if (state.mode !== "playing") return;
   updateProjectiles(worldDt);
   updatePickups(dt);
+  updateStaffDrops(dt);
   updateEffects(worldDt);
   updateAmbient(dt);
   updateFloatTexts(dt);
@@ -3520,6 +5111,9 @@ function update(dt) {
     p.dashCd = Math.max(0, p.dashCd - dt);
     p.shield = Math.max(0, p.shield - dt);
     for (const id of Object.keys(p.cooldowns)) p.cooldowns[id] = Math.max(0, p.cooldowns[id] - dt);
+    p.specialCd = Math.max(0, p.specialCd - dt);
+    updateSpirits(p, dt);
+    if (state.mode === "playing") updateRune(p, dt);
     p.stun = Math.max(0, p.stun - dt);
     p.staminaWait = Math.max(0, p.staminaWait - dt);
     if (p.staminaWait <= 0 && !p.blocking && p.dashTime <= 0) p.stamina = Math.min(stats.maxStamina, p.stamina + stats.staminaRegen * dt);
@@ -3633,7 +5227,7 @@ function updatePlayer(p, dt) {
     if (p.dashTime <= 0) finishDash(p);
   } else {
     // Blocking and drinking slow you down; a broken guard leaves you stuck for a moment.
-    const pace = p.stun > 0 ? 0 : p.drinking > 0 ? 0.4 : p.blocking ? 0.45 : 1;
+    const pace = (p.stun > 0 ? 0 : p.drinking > 0 ? 0.4 : p.blocking ? 0.45 : 1) * (1 + 0.04 * p.spirits + 0.03 * rank("jar"));
     vx = move.x * stats.speed * pace;
     vy = move.y * stats.speed * pace;
   }
@@ -3657,9 +5251,10 @@ function updatePlayer(p, dt) {
   updateAim(p, move);
 
   updateCampfire(p);
+  updateShopStall(p);
   updateLostCoins(p);
   const room = currentRoom();
-  if (room.index === 0 && state.portalOpen && !state.won && Math.hypot(p.x - WIDTH / 2, p.y - HEIGHT / 2) < 34) {
+  if (room.arena && room.row === ROOM_ROWS - 1 && state.portalOpen && !state.won && Math.hypot(p.x - WIDTH / 2, p.y - HEIGHT / 2) < 34) {
     enterDragonRoom();
     return true;
   }
@@ -3783,6 +5378,10 @@ function pushOutOfCrates(entity, r) {
 }
 
 function damageCrate(crate) {
+  if (crate.stone) {
+    crate.wobble = 0.08;
+    return;
+  }
   crate.hp -= 1;
   crate.wobble = 0.2;
   sfx.crate();
@@ -3979,7 +5578,7 @@ function updateFoes(dt) {
     enemy.hitCooldown = Math.max(0, enemy.hitCooldown - dt);
     enemy.wobble += dt;
 
-    const target = enemy.isBoss ? bossTarget(enemy) : nearestPlayer(enemy.x, enemy.y);
+    const target = enemy.isBoss ? bossTarget(enemy) : foeTarget(enemy);
     const dx = target.x - enemy.x;
     const dy = target.y - enemy.y;
     const dist = Math.hypot(dx, dy) || 1;
@@ -4012,6 +5611,8 @@ function updateFoes(dt) {
         if (enemy.hp <= 0) continue;
       }
     }
+    updateVenom(enemy, dt);
+    if (enemy.hp <= 0) continue;
 
     const half = enemy.size / 2;
     enemy.x = clamp(enemy.x, TILE + half, WIDTH - TILE - half);
@@ -4019,12 +5620,27 @@ function updateFoes(dt) {
     if (enemy.isBoss && enemy.state === "charge") {
       for (const crate of room.crates) {
         if (crate.hp > 0 && circleHitsRect(enemy.x, enemy.y, half, crate)) {
+          if (crate.stone) {
+            // Charging into a stone pillar: BONK.
+            pushOutOfCrates(enemy, half * 0.9);
+            stunEnemy(enemy, 1.4);
+            floatText(enemy.x, enemy.y - enemy.size, "BONK!", "#f6c85f", 20);
+            addShake(8);
+            sfx.slam();
+            break;
+          }
           crate.hp = 1;
           damageCrate(crate);
         }
       }
     } else if (!enemy.isDragon) {
       pushOutOfCrates(enemy, half * 0.9);
+    }
+    const trunk = state.treeMode && state.tree ? state.tree.trunk : null;
+    if (trunk && enemy.hitCooldown <= 0 && !enemy.friendly && !enemy.stone && circleHitsRect(enemy.x, enemy.y, half + 6, trunk)) {
+      // Monsters chew on the trunk a bit slower than they hit wizards.
+      hurtTree(enemy.damage * 0.6, enemy.x, enemy.y);
+      enemy.hitCooldown = 1.4;
     }
 
     if (enemy.hitCooldown <= 0 && enemy.alpha > 0.5 && !enemy.friendly && !enemy.stone && !(enemy.hop > 30) && !isStunned(enemy)) {
@@ -4194,6 +5810,16 @@ function updateMinion(enemy, dt, ux, uy, dist, step, room, target) {
       break;
     case "raven":
       updateRaven(enemy, dt, ux, uy, dist, step, room);
+      break;
+    case "totem":
+      // The totem stays put and puffs out a slow ring of shots now and then.
+      enemy.attackTimer -= dt;
+      if (enemy.attackTimer <= 0) {
+        enemy.attackTimer = 3.2;
+        const offset = Math.random() * Math.PI;
+        for (let i = 0; i < 6; i += 1) enemyShot(enemy, offset + (i / 6) * Math.PI * 2, bulletSpeed(room) * 0.6, { r: 7, color: enemy.type.accent });
+        addRing(enemy.x, enemy.y, 50, enemy.type.accent, 0.3, 5);
+      }
       break;
     default:
       enemy.x += ux * step;
@@ -4570,8 +6196,11 @@ function updateBoss(boss, dt, ux, uy, dist, slow, room) {
       boss.speed *= 1.15;
       addRing(boss.x, boss.y, 180, boss.shotColor, 0.5, 10);
       sfx.roar();
+    } else if (!boss.isDragon && room.tier >= 6 && !boss.totemDone) {
+      summonTotem(boss, room);
     }
   }
+  if (boss.isBig && boss.phase2 && !boss.totemDone && boss.hp < boss.maxHp * 0.5) summonTotem(boss, room);
   const phase3 = boss.hp < boss.maxHp * 0.25 && (!boss.isBig || boss.phase2);
   if (phase3 && !boss.furious) {
     boss.furious = true;
@@ -4694,6 +6323,18 @@ function updateBoss(boss, dt, ux, uy, dist, slow, room) {
   if (boss.state === "recover") {
     boss.stateTimer -= dt;
     if (boss.stateTimer <= 0) boss.state = "move";
+    return;
+  }
+
+  if (boss.state === "aimcannon") {
+    // Three laser lines track you, freeze, then the cannonballs fly.
+    boss.stateTimer -= dt;
+    if (boss.stateTimer > 0.4) {
+      const target = bossTarget(boss);
+      const want = Math.atan2(target.y - boss.y, target.x - boss.x);
+      boss.cannonAngle += clamp(Math.atan2(Math.sin(want - boss.cannonAngle), Math.cos(want - boss.cannonAngle)), -dt * 2.2, dt * 2.2);
+    }
+    if (boss.stateTimer <= 0) fireCannons(boss, room);
     return;
   }
 
@@ -4874,7 +6515,11 @@ function feintChance(boss, room) {
 
 function runBossPattern(boss, phase2, room, ux, uy) {
   let pattern;
-  if (boss.punish) {
+  if (boss.opener) {
+    // The entrance attack: the boss strikes the moment you walk in.
+    boss.opener = false;
+    pattern = boss.melee ? "toss" : "aim";
+  } else if (boss.punish) {
     boss.punish = false;
     pattern = boss.isDragon ? "breath" : boss.melee ? "thrust" : "aim";
   } else {
@@ -4957,6 +6602,12 @@ function runBossPattern(boss, phase2, room, ux, uy) {
   } else if (pattern === "combo") {
     // The last hit of a combo comes at a random moment, so mashing parry fails.
     const list = [{ kind: "arc", delay: 0.3 }, { kind: "arc", delay: rand(0.16, 0.38) }];
+    // From tier 3 the second slash can glow white: no block or parry, only a dodge.
+    if ((room.tier >= 3 || boss.isBig) && Math.random() < 0.55) {
+      list[1].unparry = true;
+      list[1].heavy = true;
+      list[1].delay = Math.max(list[1].delay, 0.36);
+    }
     const late = state.habits.parry > 4 ? 0.3 : 0;
     if (phase2 || room.tier >= 8 || boss.isBig) list.push({ kind: "arc", delay: rand(0.2, 0.7) + late, heavy: true });
     if (boss.desperate) list.push({ kind: "spin", delay: rand(0.25, 0.5), heavy: true });
@@ -4976,10 +6627,206 @@ function runBossPattern(boss, phase2, room, ux, uy) {
     boss.leapX = clamp(target.x, TILE + 50, WIDTH - TILE - 50);
     boss.leapY = clamp(target.y, TILE + 50, HEIGHT - TILE - 50);
     sfx.dash();
+  } else if (pattern === "barrage") {
+    boss.state = "aimcannon";
+    boss.stateTimer = boss.isBig ? 1.15 : 1.35;
+    boss.cannonAngle = Math.atan2(uy, ux);
+    tone(220, 0.6, { type: "square", volume: 0.04, slide: 300 });
+    if (!state.tips.cannon) {
+      state.tips.cannon = true;
+      toast("Cannon barrage! Hide behind a stone pillar. Wooden crates only stop one shot.", 4);
+    }
+  } else if (pattern === "toss") {
+    const target = bossTarget(boss);
+    const angle = leadAngle(boss, target, 520);
+    projectiles.push({ x: boss.x, y: boss.y, vx: Math.cos(angle) * 520, vy: Math.sin(angle) * 520, r: 15, damage: Math.round(boss.damage * 1.1), life: 2.2, owner: "enemy", kind: "boomerang", color: "#dfe7ef", spin: 0, home: boss, turn: 0.45, t: 0 });
+    boss.swordOutUntil = state.clock + 2.2;
+    floatText(boss.x, boss.y - boss.size, "Catch!", "#ff8b7d", 16);
+    sfx.slash(true);
   } else if (pattern === "teleport") {
     boss.state = "vanish";
     boss.stateTimer = 0.45;
     tone(600, 0.4, { type: "sine", volume: 0.06, slide: -450 });
+  }
+}
+
+/* ---------- new boss tricks ----------
+   - White flash: some sword slashes glow white. They go through blocks and
+     parries, so the only answer is a dash.
+   - Cannon barrage: laser lines aim, then big cannonballs fly. Stone pillars
+     stop them; wooden crates break after one.
+   - Entrance attack: from the third boss on, the boss throws its sword (or a
+     volley of shots) the moment you walk in.
+   - Lingering danger: a big spin leaves whirling blades behind, and big
+     landings send out shockwave rings you have to dash through.
+   - Shield totem: at half health a boss raises a Spirit Lantern. While it
+     lives, the boss takes only a quarter of the damage. Bonk it first! */
+function roomTier() {
+  return currentRoom().tier || 0;
+}
+
+function fireCannons(boss, room) {
+  const speed = bulletSpeed(room) * 1.35;
+  for (const offset of [-0.2, 0, 0.2]) {
+    enemyShot(boss, boss.cannonAngle + offset, speed, { r: 15, damage: Math.round(boss.damage * 1.8), kind: "cannon", color: "#2d2a2e" });
+  }
+  burst(boss.x + Math.cos(boss.cannonAngle) * boss.size * 0.6, boss.y + Math.sin(boss.cannonAngle) * boss.size * 0.6, ["#ffd166", "#ff742e", "#777777"], 18, 220);
+  addShake(7);
+  sfx.boom();
+  boss.state = "recover";
+  boss.stateTimer = 0.6;
+}
+
+// A thrown sword flies out, then curves back to the boss's hand.
+function updateBoomerang(p, dt) {
+  p.t += dt;
+  const home = p.home;
+  if (!home || home.hp <= 0) {
+    p.life = Math.min(p.life, 0.2);
+    return;
+  }
+  if (p.t < p.turn) return;
+  const dx = home.x - p.x;
+  const dy = home.y - p.y;
+  const d = Math.hypot(dx, dy) || 1;
+  const speed = 560;
+  p.vx += ((dx / d) * speed - p.vx) * Math.min(1, dt * 5);
+  p.vy += ((dy / d) * speed - p.vy) * Math.min(1, dt * 5);
+  if (d < 30) {
+    p.life = 0;
+    home.swordOutUntil = 0;
+  }
+}
+
+function addShockwave(boss, rings = 1) {
+  for (let i = 0; i < rings; i += 1) {
+    effects.push({ type: "shockwave", x: boss.x, y: boss.y + boss.size * 0.3, radius: 20 - i * 70, speed: 300, life: 1.2 + i * 0.25, max: 1.2 + i * 0.25, damage: Math.round(boss.damage * 0.7), color: boss.shotColor || boss.type.accent, hit: new Set() });
+  }
+}
+
+function totemAlive(boss) {
+  return currentRoom().enemies.some((enemy) => enemy.totem && enemy.hp > 0 && enemy.owner === boss);
+}
+
+function summonTotem(boss, room) {
+  boss.totemDone = true;
+  if (LANTERN_TYPE < 0) return;
+  const x = boss.x < WIDTH / 2 ? WIDTH - 170 : 170;
+  const y = clamp(HEIGHT - boss.y, 150, HEIGHT - 150);
+  const totem = makeEnemy(LANTERN_TYPE, x, y, { tier: room.tier, temp: true });
+  totem.behavior = "totem";
+  totem.totem = true;
+  totem.owner = boss;
+  totem.name = "Shield Totem";
+  totem.maxHp = Math.round(totem.maxHp * 2.2);
+  totem.hp = totem.maxHp;
+  totem.size = 30;
+  totem.attackTimer = 2.5;
+  room.enemies.push(totem);
+  effects.push({ type: "healbeam", x: boss.x, y: boss.y, tx: x, ty: y, life: 0.6, max: 0.6 });
+  burst(x, y, [totem.type.accent, "#ffffff"], 20, 200);
+  addRing(boss.x, boss.y, boss.size * 1.2, "#7dffb0", 0.5, 10);
+  sfx.chime();
+  toast(`${boss.name} raised a shield totem! Bonk it first to break the shield.`, 3.5);
+}
+
+function updateBossEffect(effect, dt) {
+  if (effect.type === "shockwave") {
+    effect.radius += effect.speed * dt;
+    if (effect.radius <= 0) return;
+    for (const p of livingPlayers()) {
+      if (effect.hit.has(p)) continue;
+      const d = Math.hypot(p.x - effect.x, p.y - effect.y);
+      if (Math.abs(d - effect.radius) < 12 + p.r * 0.5) {
+        effect.hit.add(p);
+        hurtPlayer(p, effect.damage, effect.x, effect.y);
+      }
+    }
+  } else if (effect.type === "bladering") {
+    for (const p of livingPlayers()) {
+      effect.cd[p.index] = Math.max(0, effect.cd[p.index] - dt);
+      if (effect.cd[p.index] > 0 || Math.hypot(p.x - effect.x, p.y - effect.y) > effect.radius + p.r * 0.5) continue;
+      effect.cd[p.index] = 0.7;
+      hurtPlayer(p, effect.damage, effect.x, effect.y);
+    }
+  }
+}
+
+function drawBossEffect(effect) {
+  if (effect.type === "shockwave") {
+    if (effect.radius <= 0) return;
+    ctx.globalAlpha = clamp(effect.life / 0.4, 0, 1) * 0.85;
+    ctx.strokeStyle = "#120c08";
+    ctx.lineWidth = 12;
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.strokeStyle = effect.color;
+    ctx.lineWidth = 7;
+    ctx.stroke();
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  } else if (effect.type === "bladering") {
+    const fade = clamp(effect.life / 0.4, 0, 1);
+    ctx.globalAlpha = fade * 0.25;
+    ctx.fillStyle = "#ef5b4b";
+    ctx.beginPath();
+    ctx.arc(effect.x, effect.y, effect.radius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.globalAlpha = fade;
+    for (let i = 0; i < 4; i += 1) {
+      const a = state.anim * 9 + (i * Math.PI) / 2;
+      ctx.save();
+      ctx.translate(effect.x + Math.cos(a) * effect.radius * 0.6, effect.y + Math.sin(a) * effect.radius * 0.6);
+      ctx.rotate(a + Math.PI / 2);
+      ctx.fillStyle = "#1a1410";
+      ctx.fillRect(-4, -18, 8, 36);
+      ctx.fillStyle = "#dfe7ef";
+      ctx.fillRect(-3, -17, 6, 30);
+      ctx.fillStyle = effect.color;
+      ctx.fillRect(-5, 12, 10, 4);
+      ctx.restore();
+    }
+  }
+  ctx.globalAlpha = 1;
+}
+
+function drawTotemMarks(enemy) {
+  if (enemy.totem) {
+    const bob = Math.sin(state.anim * 6) * 4;
+    const y = enemy.y - enemy.size - 22 + bob;
+    ctx.fillStyle = "#7dffb0";
+    ctx.beginPath();
+    ctx.moveTo(enemy.x - 9, y);
+    ctx.lineTo(enemy.x + 9, y);
+    ctx.lineTo(enemy.x, y + 11);
+    ctx.closePath();
+    ctx.fill();
+    outlinedText("Bonk me!", enemy.x, y - 6, { size: 14, align: "center", font: DISPLAY_FONT, color: "#7dffb0" });
+    if (enemy.owner && enemy.owner.hp > 0) {
+      ctx.globalAlpha = 0.35 + Math.sin(state.anim * 10) * 0.15;
+      ctx.strokeStyle = "#7dffb0";
+      ctx.lineWidth = 3;
+      ctx.setLineDash([8, 8]);
+      ctx.beginPath();
+      ctx.moveTo(enemy.x, enemy.y);
+      ctx.lineTo(enemy.owner.x, enemy.owner.y - (enemy.owner.hop || 0));
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.globalAlpha = 1;
+    }
+  } else if (enemy.isBoss && totemAlive(enemy)) {
+    ctx.globalAlpha = 0.3 + Math.sin(state.anim * 6) * 0.1;
+    ctx.strokeStyle = "#7dffb0";
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.arc(enemy.x, enemy.y - (enemy.hop || 0) - (enemy.isBig ? enemy.size * 0.2 : 0), enemy.size * (enemy.isBig ? 0.85 : 0.75), 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.fillStyle = "#7dffb0";
+    ctx.globalAlpha *= 0.4;
+    ctx.fill();
+    ctx.globalAlpha = 1;
   }
 }
 
@@ -4992,6 +6839,7 @@ function bossSlam(boss, room) {
   for (const p of livingPlayers()) {
     if (Math.hypot(p.x - boss.x, p.y - boss.y) < radius + p.r) hurtPlayer(p, boss.damage * 1.3, boss.x, boss.y, boss);
   }
+  if (boss.isBig) addShockwave(boss, boss.phase2 ? 2 : 1);
   const count = boss.enraged ? 16 : 10;
   const offset = Math.random() * Math.PI;
   for (let i = 0; i < count; i += 1) enemyShot(boss, offset + (i / count) * Math.PI * 2, bulletSpeed(room) * 0.7, { color: boss.shotColor });
@@ -5035,6 +6883,7 @@ function updateProjectiles(dt) {
         p.vy = Math.sin(now + turn) * speed;
       }
     }
+    if (p.kind === "boomerang") updateBoomerang(p, dt);
     p.x += p.vx * dt;
     p.y += p.vy * dt;
     p.life -= dt;
@@ -5049,13 +6898,24 @@ function updateProjectiles(dt) {
     }
 
     if (p.x < TILE - 2 || p.x > WIDTH - TILE + 2 || p.y < TILE - 2 || p.y > HEIGHT - TILE + 2) {
-      projectileImpact(p);
-      continue;
+      if (p.kind === "boomerang") {
+        p.x = clamp(p.x, TILE, WIDTH - TILE);
+        p.y = clamp(p.y, TILE, HEIGHT - TILE);
+        p.t = Math.max(p.t, p.turn);
+      } else {
+        projectileImpact(p);
+        continue;
+      }
     }
 
-    const crate = room.crates.find((c) => c.hp > 0 && circleHitsRect(p.x, p.y, p.r * 0.8, c));
+    const crate = p.kind === "boomerang" ? null : room.crates.find((c) => c.hp > 0 && circleHitsRect(p.x, p.y, p.r * 0.8, c));
     if (crate) {
       if (p.owner === "player") damageCrate(crate);
+      else if (p.kind === "cannon" && !crate.stone) {
+        crate.hp = 1;
+        damageCrate(crate);
+      }
+      if (crate.tree && p.owner === "enemy") hurtTree(p.damage * 0.6, p.x, p.y);
       projectileImpact(p);
       continue;
     }
@@ -5070,6 +6930,15 @@ function updateProjectiles(dt) {
         if (p.kind !== "fireball") damageEnemy(target, p.damage, p.petEvo === "flame" ? "fire" : p.petEvo === "frost" ? "frost" : p.petEvo === "storm" ? "zap" : "staff");
         if (p.petEvo) petSparkHit(p, target);
         if (p.petSlime) target.stickyUntil = Math.max(target.stickyUntil || 0, state.clock + 1.2);
+        if (p.lifesteal !== undefined) {
+          const vamp = players[p.lifesteal];
+          if (vamp && vamp.hp > 0 && vamp.hp < stats.maxHp) {
+            const heal = Math.max(1, Math.round(stats.maxHp * 0.02));
+            vamp.hp = Math.min(stats.maxHp, vamp.hp + heal);
+            floatText(vamp.x, vamp.y - 34, `+${heal}`, "#ff8b7d", 12);
+          }
+        }
+        if (p.bolt) staffBoltHit(target);
         projectileImpact(p, target);
       }
     } else {
@@ -5118,6 +6987,10 @@ function pierceHit(p, enemy) {
   if (p.kind === "phoenix") {
     // A small blast on every enemy the bird flies through.
     explode(enemy.x, enemy.y, enemy, p.damage, 0.6, 0.5);
+  } else if (p.kind === "needle") {
+    enemy.stickyUntil = Math.max(enemy.stickyUntil || 0, state.clock + 1.4);
+    burst(enemy.x, enemy.y, ["#7bd35a", "#ffffff"], 4, 100);
+    damageEnemy(enemy, p.damage, "staff");
   } else {
     enemy.burnUntil = 0;
     enemy.slowUntil = Math.max(enemy.slowUntil, state.clock + 1.6);
@@ -5208,6 +7081,10 @@ function explode(x, y, target = null, direct = 0, size = 1, power = 1) {
 function updatePickups(dt) {
   for (const item of pickups) {
     item.t += dt;
+    if (item.kind === "spirit" && item.t > 10) {
+      item.taken = true;
+      continue;
+    }
     item.x += item.vx * dt;
     item.y += item.vy * dt;
     const drag = Math.pow(0.02, dt);
@@ -5220,7 +7097,7 @@ function updatePickups(dt) {
     let taker = null;
     let d = Infinity;
     for (const p of livingPlayers()) {
-      const wants = item.kind === "heart" ? p.hp < stats.maxHp : item.kind === "star" ? p.mana < stats.maxMana : true;
+      const wants = item.kind === "heart" ? p.hp < stats.maxHp : item.kind === "star" ? p.mana < stats.maxMana : item.kind === "spirit" ? p.spirits < spiritCap() : true;
       const gap = Math.hypot(p.x - item.x, p.y - item.y) || 1;
       if (wants && gap < d) {
         taker = p;
@@ -5243,11 +7120,15 @@ function updatePickups(dt) {
   }
 }
 
+const STAFF_EFFECTS = new Set(["bounceball", "icewall", "skelly", "stormcloud"]);
+
 function updateEffects(dt) {
   const landed = [];
   for (const effect of effects) {
     effect.life -= dt;
-    if (effect.life <= 0 && ["meteor", "storm", "hazard", "flask", "orb"].includes(effect.type)) landed.push(effect);
+    if (effect.life <= 0 && ["meteor", "storm", "hazard", "flask", "orb", "starfall"].includes(effect.type)) landed.push(effect);
+    if (effect.life > 0 && STAFF_EFFECTS.has(effect.type)) updateStaffEffect(effect, dt);
+    if (effect.life > 0 && (effect.type === "shockwave" || effect.type === "bladering")) updateBossEffect(effect, dt);
     if (effect.type === "blizzard") updateBlizzard(effect, dt);
     if (effect.type === "firetrail") updateFireTrail(effect, dt);
     if (effect.type === "poison") updatePoison(effect, dt);
@@ -5263,6 +7144,7 @@ function updateEffects(dt) {
     else if (effect.type === "hazard") hazardImpact(effect);
     else if (effect.type === "flask") flaskLand(effect);
     else if (effect.type === "orb") ballLightningPop(effect);
+    else if (effect.type === "starfall") starImpact(effect);
     else thunderStrike(effect);
   }
   for (const crate of currentRoom().crates) crate.wobble = Math.max(0, crate.wobble - dt);
@@ -5518,7 +7400,7 @@ function renderRoomBackground(room) {
   if (doors.down) carveDoor(g, WIDTH / 2 - DOOR_HALF, HEIGHT - TILE, DOOR_HALF * 2, TILE, b);
   // Gates get a doorway even while locked; the bars are drawn on top each frame.
   if (doors.left || room.arena) carveDoor(g, 0, HEIGHT / 2 - DOOR_HALF, TILE, DOOR_HALF * 2, b);
-  if (doors.right || isRowEnd(room)) carveDoor(g, WIDTH - TILE, HEIGHT / 2 - DOOR_HALF, TILE, DOOR_HALF * 2, b);
+  if (doors.right || isRowEnd(room) || (room.arena && room.row < ROOM_ROWS - 1)) carveDoor(g, WIDTH - TILE, HEIGHT / 2 - DOOR_HALF, TILE, DOOR_HALF * 2, b);
 }
 
 const ARENA_COLORS = {
@@ -5766,7 +7648,7 @@ function drawRoom(room) {
     if (doors.right) drawChevron(WIDTH - 16, HEIGHT / 2, 1, 0);
   }
 
-  if (room.index === 0 && state.portalOpen && !state.won && state.mode !== "title") drawPortal(WIDTH / 2, HEIGHT / 2);
+  if (room.arena && room.row === ROOM_ROWS - 1 && state.portalOpen && !state.won && state.mode !== "title") drawPortal(WIDTH / 2, HEIGHT / 2);
   drawGate(room);
 }
 
@@ -5778,9 +7660,21 @@ function drawGate(room) {
   let row;
   let locked;
   if (room.arena) {
-    x = 0;
-    row = room.row;
-    locked = Boolean(room.boss && room.boss.hp > 0);
+    const doors = roomDoors(room);
+    if (!doors.left) drawBars(0);
+    if (room.row < ROOM_ROWS - 1) {
+      if (!doors.right) drawBars(WIDTH - TILE);
+      else {
+        const pulse = 0.45 + Math.sin(state.anim * 4) * 0.25;
+        const next = worlds[room.row + 1];
+        ctx.globalAlpha = pulse;
+        ctx.fillStyle = next.color;
+        ctx.fillRect(WIDTH - TILE + 4, HEIGHT / 2 - DOOR_HALF + 4, TILE - 4, DOOR_HALF * 2 - 8);
+        ctx.globalAlpha = 1;
+        outlinedText(`World ${room.row + 2}: ${next.name}`, WIDTH - TILE - 10, HEIGHT / 2 - DOOR_HALF - 12, { size: 14, align: "right", color: next.color, font: DISPLAY_FONT });
+      }
+    }
+    return;
   } else if (isRowEnd(room)) {
     x = WIDTH - TILE;
     row = Math.floor(room.index / ROOM_COLS);
@@ -5791,6 +7685,26 @@ function drawGate(room) {
   const y = HEIGHT / 2 - DOOR_HALF;
   const h = DOOR_HALF * 2;
   if (locked) {
+    drawBars(x);
+  } else if (!room.arena && !state.bigBeaten.has(row)) {
+    const pulse = 0.45 + Math.sin(state.anim * 4) * 0.25;
+    ctx.fillStyle = `rgba(192, 132, 252, ${pulse})`;
+    ctx.fillRect(x + 4, y + 4, TILE - 4, h - 8);
+    if (Math.random() < 0.2) burst(x + rand(6, TILE), y + rand(10, h - 10), ["#c084fc", "#f6c85f"], 1, 50);
+  }
+  if (!room.arena) {
+    const beaten = state.bigBeaten.has(row);
+    const label = beaten ? "Big boss beaten!" : locked ? `Big boss gate ${rowBossesBeaten(row)}/${ROOM_COLS}` : "BIG BOSS!";
+    const color = beaten ? "#9ee49c" : locked ? "#c5a988" : "#c084fc";
+    outlinedText(label, WIDTH - TILE - 10, y - 12, { size: 14, align: "right", color, font: DISPLAY_FONT });
+  }
+}
+
+// Iron bars and a padlock across a doorway.
+function drawBars(x) {
+  const y = HEIGHT / 2 - DOOR_HALF;
+  const h = DOOR_HALF * 2;
+  {
     ctx.fillStyle = "#120c08";
     ctx.fillRect(x, y, TILE, h);
     for (const bx of [3, 13, 23]) {
@@ -5811,17 +7725,6 @@ function drawGate(room) {
     ctx.fillRect(x + 8, y + h / 2 - 5, 16, 14);
     ctx.fillStyle = "#3a2a10";
     ctx.fillRect(x + 15, y + h / 2, 3, 5);
-  } else if (!room.arena && !state.bigBeaten.has(row)) {
-    const pulse = 0.45 + Math.sin(state.anim * 4) * 0.25;
-    ctx.fillStyle = `rgba(192, 132, 252, ${pulse})`;
-    ctx.fillRect(x + 4, y + 4, TILE - 4, h - 8);
-    if (Math.random() < 0.2) burst(x + rand(6, TILE), y + rand(10, h - 10), ["#c084fc", "#f6c85f"], 1, 50);
-  }
-  if (!room.arena) {
-    const beaten = state.bigBeaten.has(row);
-    const label = beaten ? "Big boss beaten!" : locked ? `Big boss gate ${rowBossesBeaten(row)}/${ROOM_COLS}` : "BIG BOSS!";
-    const color = beaten ? "#9ee49c" : locked ? "#c5a988" : "#c084fc";
-    outlinedText(label, WIDTH - TILE - 10, y - 12, { size: 14, align: "right", color, font: DISPLAY_FONT });
   }
 }
 
@@ -5858,7 +7761,11 @@ function drawPortal(x, y) {
 
 function drawCrates(room) {
   for (const crate of room.crates) {
-    if (crate.hp <= 0) continue;
+    if (crate.hp <= 0 || crate.tree) continue;
+    if (crate.stone) {
+      drawPillar(crate);
+      continue;
+    }
     const wobble = crate.wobble > 0 ? Math.sin(crate.wobble * 60) * 2 : 0;
     const x = crate.x + wobble;
     const y = crate.y;
@@ -5890,6 +7797,24 @@ function drawCrates(room) {
       ctx.stroke();
     }
   }
+}
+
+// A stone pillar: nothing breaks it, so it's the place to hide from cannons.
+function drawPillar(crate) {
+  const { x, y, w, h } = crate;
+  ctx.fillStyle = "rgba(0, 0, 0, 0.3)";
+  ctx.fillRect(x + 4, y + h - 2, w + 2, 7);
+  ctx.fillStyle = "#2b2830";
+  ctx.fillRect(x - 2, y - 2, w + 4, h + 4);
+  ctx.fillStyle = "#8d8996";
+  ctx.fillRect(x, y + 6, w, h - 6);
+  ctx.fillStyle = "#a9a5b3";
+  ctx.fillRect(x - 2, y, w + 4, 8);
+  ctx.fillStyle = "#6f6b79";
+  ctx.fillRect(x + 6, y + 12, 4, h - 18);
+  ctx.fillRect(x + w - 10, y + 12, 4, h - 18);
+  ctx.fillStyle = "rgba(255, 255, 255, 0.25)";
+  ctx.fillRect(x + 2, y + 1, w - 4, 2);
 }
 
 function drawAmbient() {
@@ -6929,6 +8854,7 @@ function drawFoes(room) {
     }
     if (enemy.isBig) drawBigBossFoe(enemy);
     else drawEnemy(enemy);
+    if (enemy.totem || enemy.isBoss) drawTotemMarks(enemy);
     if (enemy.state === "tell") drawTell(enemy);
     if (isStunned(enemy)) drawStunStars(enemy.x, enemy.y - enemy.size * (enemy.isBig ? 0.95 : 0.7) - (enemy.hop || 0), enemy.isBoss ? 1.3 : 1);
   }
@@ -6936,6 +8862,7 @@ function drawFoes(room) {
 
 // A blocky sword held out from the boss's side.
 function drawSword(boss, cx, cy) {
+  if (state.clock < (boss.swordOutUntil || 0)) return;
   const big = boss.isBig;
   const s = boss.size;
   const u = big ? 4 : 3;
@@ -7235,15 +9162,22 @@ function drawTelegraph(enemy) {
   if (enemy.state === "swing" && enemy.swings && enemy.swings[0]) {
     // A red wedge shows where the sword is about to land.
     const kind = enemy.swings[0].kind;
+    const white = Boolean(enemy.swings[0].unparry);
     const k = clamp(enemy.stateTimer / enemy.swingTotal, 0, 1);
     const angle = Math.atan2(enemy.lockY, enemy.lockX);
     const spread = swingSpread(kind);
-    ctx.fillStyle = `rgba(239, 91, 75, ${0.1 + (1 - k) * 0.25})`;
+    ctx.fillStyle = white ? `rgba(255, 255, 255, ${0.2 + (1 - k) * 0.35 + Math.sin(state.anim * 40) * 0.08})` : `rgba(239, 91, 75, ${0.1 + (1 - k) * 0.25})`;
     ctx.beginPath();
     ctx.moveTo(enemy.x, enemy.y);
     ctx.arc(enemy.x, enemy.y, swingReach(enemy, kind), angle - spread, angle + spread);
     ctx.closePath();
     ctx.fill();
+    if (white) {
+      ctx.strokeStyle = "#ffffff";
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      outlinedText("DODGE!", enemy.x, enemy.y - enemy.size - 12, { size: 16, align: "center", font: DISPLAY_FONT, color: "#ffffff" });
+    }
   }
   if (enemy.state === "leap") {
     const k = clamp(enemy.stateTimer / enemy.leapTime, 0, 1);
@@ -7266,6 +9200,19 @@ function drawTelegraph(enemy) {
     ctx.fillStyle = `rgba(239, 91, 75, ${0.18 + Math.sin(state.anim * 30) * 0.08})`;
     ctx.fillRect(0, -width / 2, length, width);
     ctx.restore();
+  }
+  if (enemy.state === "aimcannon") {
+    const late = enemy.stateTimer < 0.4;
+    for (const offset of [-0.2, 0, 0.2]) {
+      const a = enemy.cannonAngle + offset;
+      ctx.strokeStyle = late ? `rgba(255, 60, 40, ${0.6 + Math.sin(state.anim * 50) * 0.3})` : "rgba(255, 60, 40, 0.35)";
+      ctx.lineWidth = late ? 4 : 2;
+      ctx.beginPath();
+      ctx.moveTo(enemy.x, enemy.y);
+      ctx.lineTo(enemy.x + Math.cos(a) * 1100, enemy.y + Math.sin(a) * 1100);
+      ctx.stroke();
+    }
+    outlinedText("!", enemy.x, enemy.y - enemy.size * (enemy.isBig ? 1.05 : 0.8), { size: 26, align: "center", font: DISPLAY_FONT, color: late ? "#ffffff" : "#ff5a3d" });
   }
   if (enemy.state === "fuse") {
     ctx.strokeStyle = `rgba(239, 91, 75, ${0.5 + Math.sin(state.anim * 30) * 0.3})`;
@@ -7780,6 +9727,7 @@ function drawPlayer(p) {
     return;
   }
   const blink = p.invulnerable > 0 && p.dashTime <= 0 && Math.floor(state.anim * 16) % 2 === 0;
+  drawStaffAura(p);
   if (!blink || state.mode !== "playing") {
     drawWizard(ctx, p.x, p.y, look.robe, p.dirX, p.dirY, state.anim + p.index * 0.7, p.moving, look.hat);
   }
@@ -7810,6 +9758,7 @@ function drawPlayer(p) {
       });
     }
   }
+  drawSpirits(p);
   if (p.blocking) drawGuard(p);
   if (p.stun > 0) drawStunStars(p.x, p.y - 44, 0.8);
   if (p.drinking > 0) {
@@ -7872,7 +9821,7 @@ function drawGhost(p, look) {
 
 // Things lying on the floor, like the frosty puddle Frost Nova leaves behind.
 function drawCampfire(room) {
-  const { x, y } = CAMPFIRE;
+  const { x, y } = campfireSpot(room);
   const lit = state.checkpoint === room.index;
   ctx.fillStyle = "rgba(255, 170, 60, 0.12)";
   ctx.beginPath();
@@ -8014,7 +9963,36 @@ function drawProjectiles() {
   for (const p of projectiles) {
     ctx.save();
     ctx.translate(p.x, p.y);
-    if (p.owner === "enemy") {
+    if (p.owner === "enemy" && p.kind === "cannon") {
+      ctx.fillStyle = "rgba(120, 120, 120, 0.35)";
+      ctx.beginPath();
+      ctx.arc(-p.vx * 0.03, -p.vy * 0.03, p.r * 0.9, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "#0d0b0e";
+      ctx.beginPath();
+      ctx.arc(0, 0, p.r + 2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = p.color;
+      ctx.beginPath();
+      ctx.arc(0, 0, p.r, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(255, 255, 255, 0.45)";
+      ctx.fillRect(-p.r * 0.5, -p.r * 0.6, p.r * 0.5, p.r * 0.4);
+      ctx.fillStyle = "#ff742e";
+      ctx.fillRect(-2, -p.r - 4, 4, 5);
+    } else if (p.owner === "enemy" && p.kind === "boomerang") {
+      ctx.rotate(p.spin * 1.6);
+      ctx.fillStyle = "#1a1410";
+      ctx.fillRect(-22, -5, 44, 10);
+      ctx.fillStyle = "#dfe7ef";
+      ctx.fillRect(-20, -4, 30, 8);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-20, -4, 30, 2);
+      ctx.fillStyle = "#f6c85f";
+      ctx.fillRect(10, -8, 4, 16);
+      ctx.fillStyle = "#4a2d1a";
+      ctx.fillRect(14, -3, 8, 6);
+    } else if (p.owner === "enemy") {
       ctx.rotate(p.spin);
       ctx.fillStyle = "#1a0a18";
       ctx.fillRect(-p.r - 2, -p.r - 2, p.r * 2 + 4, p.r * 2 + 4);
@@ -8045,6 +10023,32 @@ function drawProjectiles() {
       ctx.fillRect(12, -3, 3, 3);
       ctx.fillStyle = "#ffd166";
       ctx.fillRect(16, -1, 5, 3);
+    } else if (p.kind === "needle") {
+      ctx.rotate(Math.atan2(p.vy, p.vx));
+      ctx.fillStyle = "#1a3d1f";
+      ctx.fillRect(-9, -3, 18, 6);
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-8, -2, 14, 4);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(6, -1, 4, 2);
+    } else if (p.kind === "bat") {
+      const flap = Math.sin(p.spin * 3) * 6;
+      ctx.rotate(Math.atan2(p.vy, p.vx) + Math.PI / 2);
+      ctx.fillStyle = "#3a1f2e";
+      ctx.beginPath();
+      ctx.moveTo(0, -2);
+      ctx.lineTo(-12, -4 - flap);
+      ctx.lineTo(-6, 4);
+      ctx.lineTo(0, 2);
+      ctx.lineTo(6, 4);
+      ctx.lineTo(12, -4 - flap);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = p.color;
+      ctx.fillRect(-3, -4, 6, 7);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(-2, -3, 1, 1);
+      ctx.fillRect(1, -3, 1, 1);
     } else if (p.kind === "icicle") {
       ctx.rotate(Math.atan2(p.vy, p.vx));
       ctx.fillStyle = "#ffffff";
@@ -8108,6 +10112,19 @@ function drawPickups() {
       drawHeart(ctx, x, y, 3, "#ef5b4b");
     } else if (item.kind === "star") {
       drawStar(ctx, x, y, 9, "#6bc4ff");
+    } else if (item.kind === "spirit") {
+      if (item.t > 7 && Math.floor(state.anim * 8) % 2 === 0) continue;
+      const glow = 0.25 + Math.sin(state.anim * 6 + item.x) * 0.1;
+      ctx.fillStyle = `rgba(125, 255, 212, ${glow})`;
+      ctx.fillRect(x - 10, y - 12, 20, 20);
+      ctx.fillStyle = "#1d5a4a";
+      ctx.fillRect(x - 6, y - 8, 12, 12);
+      ctx.fillStyle = SPIRIT_COLOR;
+      ctx.fillRect(x - 5, y - 7, 10, 10);
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 3, y - 5, 3, 3);
+      ctx.fillStyle = "rgba(125, 255, 212, 0.6)";
+      ctx.fillRect(x - 2, y + 3 + Math.sin(state.anim * 8) * 2, 4, 6);
     }
   }
 }
@@ -8320,6 +10337,8 @@ function drawPetBreath(effect) {
   ctx.globalAlpha = 1;
 }
 
+const STAFF_DRAWN = new Set(["bounceball", "icewall", "skelly", "stormcloud", "ghostline", "starfall"]);
+
 function drawEffects() {
   for (const effect of effects) {
     if (effect.type === "healbeam") {
@@ -8338,6 +10357,18 @@ function drawEffects() {
     }
     if (effect.type === "petbreath") {
       drawPetBreath(effect);
+      continue;
+    }
+    if (effect.type === "rune") {
+      drawRune(effect);
+      continue;
+    }
+    if (effect.type === "shockwave" || effect.type === "bladering") {
+      drawBossEffect(effect);
+      continue;
+    }
+    if (STAFF_DRAWN.has(effect.type)) {
+      drawStaffEffect(effect);
       continue;
     }
     if (effect.type === "slash") {
@@ -8586,13 +10617,17 @@ function drawButton(label, x, y, w, h, action, options = {}) {
 
 function drawHud(room) {
   ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
-  ctx.fillRect(12, 12, 270, 70);
-  outlinedText(room.final ? "Dragon's Lair" : room.arena ? "Big Boss Arena" : `Room ${room.index + 1} / ${ROOM_COUNT}`, 26, 40, { size: 20, font: DISPLAY_FONT, color: room.arena ? "#c084fc" : "#f8ead2" });
-  outlinedText(room.biome.name, 26, 64, { size: 14, color: "#f6c85f" });
+  ctx.fillRect(12, 12, 280, 70);
   const bossAlive = room.boss && room.boss.hp > 0;
-  ctx.font = `700 14px ${BODY_FONT}`;
-  const statusX = Math.max(146, 26 + ctx.measureText(room.biome.name).width + 14);
-  outlinedText(bossAlive ? "Boss: awake" : "Boss: defeated", statusX, 64, { size: 14, color: bossAlive ? "#ff8b7d" : "#9ee49c" });
+  if (room.tree && state.tree) {
+    drawTreeHud(state.tree);
+  } else {
+    outlinedText(roomLabel(room, true), 26, 40, { size: 19, font: DISPLAY_FONT, color: room.arena ? "#c084fc" : room.final ? "#f6c85f" : worlds[roomRow(room)].color });
+    outlinedText(room.biome.name, 26, 64, { size: 14, color: "#f6c85f" });
+    ctx.font = `700 14px ${BODY_FONT}`;
+    const statusX = Math.max(146, 26 + ctx.measureText(room.biome.name).width + 14);
+    outlinedText(bossAlive ? "Boss: awake" : "Boss: defeated", statusX, 64, { size: 14, color: bossAlive ? "#ff8b7d" : "#9ee49c" });
+  }
 
   ctx.fillStyle = "rgba(0, 0, 0, 0.45)";
   ctx.fillRect(WIDTH - 152, 12, 140, 40);
@@ -8604,7 +10639,7 @@ function drawHud(room) {
   ctx.fillRect(WIDTH - 134, 27, 4, 7);
   outlinedText(String(state.coins), WIDTH - 110, 40, { size: 20, font: DISPLAY_FONT, color: "#f6c85f" });
 
-  if (isRoomCleared(room) && !room.final) {
+  if (isRoomCleared(room) && !room.final && !room.tree) {
     ctx.fillStyle = "rgba(49, 91, 55, 0.8)";
     ctx.fillRect(WIDTH - 152, 58, 140, 30);
     outlinedText("Room Cleared", WIDTH - 82, 79, { size: 15, align: "center", color: "#ffffff" });
@@ -8612,10 +10647,10 @@ function drawHud(room) {
 
   if (bossAlive) drawBossBar(room.boss);
   if (state.twoPlayer) {
-    drawHotbar(players[0], 16, ["1", "2", "3", "4", "5", "LShift", "Q"], 44, true);
-    drawHotbar(players[1], WIDTH - 16 - (7 * 44 + 6 * 6), ["7", "8", "9", "0", "-", "Enter", "/"], 44, true);
+    drawHotbar(players[0], 16, ["1", "2", "3", "4", "5", "E", "LShift", "Q"], 44, true);
+    drawHotbar(players[1], WIDTH - 16 - (8 * 44 + 7 * 6), ["7", "8", "9", "0", "-", ",", "Enter", "/"], 44, true);
   } else {
-    drawHotbar(player, null, ["1", "2", "3", "4", "5", "Shift", "Q"], 54, false);
+    drawHotbar(player, null, ["1", "2", "3", "4", "5", "E", "Shift", "Q"], 54, false);
   }
 
   if (state.messageTimer > 0 && state.message && state.mode === "playing") {
@@ -8629,8 +10664,8 @@ function drawHud(room) {
     ctx.globalAlpha = 1;
   }
 
-  if (room.index === 0 && state.portalOpen && !state.won && Math.floor(state.anim * 2) % 2 === 0) {
-    outlinedText("The golden portal is open in the middle of this room!", WIDTH / 2, 120, { size: 16, align: "center", color: "#f6c85f" });
+  if (room.arena && room.row === ROOM_ROWS - 1 && state.portalOpen && !state.won && Math.floor(state.anim * 2) % 2 === 0) {
+    outlinedText("The golden portal is open in the middle of this arena!", WIDTH / 2, 120, { size: 16, align: "center", color: "#f6c85f" });
   }
 }
 
@@ -8663,7 +10698,7 @@ function drawBossBar(boss) {
 // in a bottom corner, with their health and mana above it.
 function drawHotbar(p, left, labels, slot, withBars) {
   const gap = withBars ? 6 : 8;
-  const slots = [...spells.map((spell, i) => ({ spell, key: labels[i] })), { dash: true, key: labels[spells.length] }, { flask: true, key: labels[spells.length + 1] }];
+  const slots = [...spells.map((spell, i) => ({ spell, key: labels[i] })), { special: true, key: labels[spells.length] }, { dash: true, key: labels[spells.length + 1] }, { flask: true, key: labels[spells.length + 2] }];
   const total = slots.length * slot + (slots.length - 1) * gap;
   let x = left === null ? WIDTH / 2 - total / 2 : left;
   const y = HEIGHT - slot - 18;
@@ -8702,6 +10737,21 @@ function drawHotbar(p, left, labels, slot, withBars) {
     let fraction = 0;
     let color = dashColor();
     let id = stats.dash === "normal" ? "dash" : `dash-${stats.dash}`;
+    if (item.special) {
+      const rarity = staffRarity(p.staff);
+      drawStaffIcon(ctx, x + slot / 2, y + slot / 2 + 2, p.staff.id, slot / 54);
+      const left = p.specialCd / (p.specialMax || 1);
+      if (left > 0) {
+        ctx.fillStyle = "rgba(0, 0, 0, 0.6)";
+        ctx.fillRect(x, y, slot, slot * left);
+      }
+      ctx.strokeStyle = left > 0 ? "#5b412d" : rarity.color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(x + 1.5, y + 1.5, slot - 3, slot - 3);
+      outlinedText(item.key, x + 5, y + 15, { size: 13, color: "#f8ead2" });
+      x += slot + gap;
+      continue;
+    }
     const evolved = item.flask ? false : item.dash ? stats.dash !== "normal" : Boolean(stats.evo[item.spell.id]);
     const mega = item.flask ? false : item.dash ? stats.dashMega : Boolean(stats.mega[item.spell.id]);
     if (item.flask) {
@@ -9111,6 +11161,63 @@ function drawUpgradeIcon(icon, x, y, color) {
     case "fox":
       drawPet(ctx, x, y + 8, 1, 0, state.anim);
       break;
+    case "crit":
+      drawStar(ctx, x, y, 30, color);
+      outlinedText("x2", x, y + 7, { size: 20, align: "center", font: DISPLAY_FONT, color: "#241c17", outline: null });
+      break;
+    case "thorn":
+      ctx.fillStyle = "#5b34c4";
+      ctx.beginPath();
+      ctx.moveTo(x, y - 26);
+      ctx.lineTo(x + 22, y + 24);
+      ctx.lineTo(x - 22, y + 24);
+      ctx.closePath();
+      ctx.fill();
+      ctx.fillStyle = color;
+      for (const [sx, sy, dir] of [[-14, 4, -1], [14, 4, 1], [-18, 18, -1], [18, 18, 1], [-8, -10, -1], [8, -10, 1]]) {
+        ctx.beginPath();
+        ctx.moveTo(x + sx, y + sy - 4);
+        ctx.lineTo(x + sx + dir * 10, y + sy);
+        ctx.lineTo(x + sx, y + sy + 4);
+        ctx.fill();
+      }
+      break;
+    case "feather":
+      ctx.save();
+      ctx.translate(x, y);
+      ctx.rotate(-0.7);
+      ctx.fillRect(-2, -28, 4, 56);
+      for (let i = 0; i < 6; i += 1) {
+        ctx.fillRect(-14 + i, -22 + i * 8, 12 - i, 5);
+        ctx.fillRect(2, -22 + i * 8, 12 - i, 5);
+      }
+      ctx.restore();
+      break;
+    case "rune":
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(x, y, 24, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.moveTo(x, y - 16);
+      ctx.lineTo(x + 14, y + 10);
+      ctx.lineTo(x - 14, y + 10);
+      ctx.closePath();
+      ctx.stroke();
+      ctx.fillRect(x - 3, y - 3, 6, 6);
+      break;
+    case "orb":
+      for (let i = 0; i < 3; i += 1) {
+        const a = state.anim * 2 + (i * Math.PI * 2) / 3;
+        ctx.fillStyle = "#1d5a4a";
+        ctx.fillRect(x + Math.cos(a) * 18 - 9, y + Math.sin(a) * 18 - 9, 18, 18);
+        ctx.fillStyle = color;
+        ctx.fillRect(x + Math.cos(a) * 18 - 7, y + Math.sin(a) * 18 - 7, 14, 14);
+      }
+      ctx.fillStyle = "#ffffff";
+      ctx.fillRect(x - 4, y - 4, 8, 8);
+      break;
     case "pet": {
       const [, evo, mega] = icon.split(":");
       ctx.save();
@@ -9189,7 +11296,8 @@ function drawTitle() {
   const wave = Math.sin(state.anim * 2) * 4;
   outlinedText("Block Dungeon", WIDTH / 2, 98 + wave, { size: 68, align: "center", font: DISPLAY_FONT, color: "#f6c85f", outline: "#120c08" });
   outlinedText("Spell Runner", WIDTH / 2, 150 + wave, { size: 44, align: "center", font: DISPLAY_FONT, color: "#f8ead2" });
-  outlinedText("Clear 30 rooms. Beat 30 bosses. Find out what waits at the end.", WIDTH / 2, 186, { size: 16, align: "center", color: "#c5a988" });
+  const treeMode = state.playMode === "tree";
+  outlinedText(treeMode ? `Spirit Tree: protect the tree from ${TREE_WAVES} waves.${state.bestWave ? ` Best: wave ${state.bestWave}` : ""}` : "Five worlds. Ten chapters. Five big bosses. Find out what waits at the end.", WIDTH / 2, 186, { size: 16, align: "center", color: treeMode ? "#7dffb0" : "#c5a988" });
 
   const two = state.twoPlayer;
   const spots = two ? [WIDTH / 2 - 160, WIDTH / 2 + 160] : [WIDTH / 2];
@@ -9217,10 +11325,13 @@ function drawTitle() {
   if (!two) outlinedText(pick.desc, petX, 400, { size: 12, align: "center", color: "#c5a988" });
   if (!two) drawFoeBody(ctx, 8, 760, 282, 40, state.anim, { x: -1, y: 0 });
 
-  drawButton(two ? "Players: 2" : "Players: 1", WIDTH / 2 - 220, 430, 210, 38, togglePlayers, { size: 16 });
-  drawButton(`Difficulty: ${difficulty().name}`, WIDTH / 2 + 10, 430, 210, 38, cycleDifficulty, { size: 16 });
+  drawButton(two ? "Players: 2" : "Players: 1", WIDTH / 2 - 300, 430, 190, 38, togglePlayers, { size: 16 });
+  drawButton(`Difficulty: ${difficulty().name}`, WIDTH / 2 - 95, 430, 190, 38, cycleDifficulty, { size: 16 });
+  drawButton(treeMode ? "Mode: Spirit Tree" : "Mode: Dungeon", WIDTH / 2 + 110, 430, 190, 38, togglePlayMode, { size: 16 });
 
-  if (state.hasSave) {
+  if (treeMode) {
+    drawButton("Defend the tree", WIDTH / 2 - 130, 486, 260, 52, startTreeMode, { primary: true });
+  } else if (state.hasSave) {
     drawButton("Continue", WIDTH / 2 - 230, 486, 220, 52, () => { loadGame() || startNewGame(); }, { primary: true });
     drawButton(state.confirmNew ? "Tap again to restart" : "New adventure", WIDTH / 2 + 10, 486, 220, 52, () => {
       if (state.confirmNew) startNewGame();
@@ -9231,7 +11342,7 @@ function drawTitle() {
   }
 
   outlinedText(`Hats collected: ${state.hatsUnlocked.size} / ${hats.length}  ·  Combos found: ${state.combosFound.size} / ${combos.length}`, WIDTH / 2, 568, { size: 15, align: "center", color: "#f6c85f" });
-  let hint = "Enter to start  ·  A/D robe, W/S hat, Q/E pet  ·  2 for two players  ·  M sound";
+  let hint = "Enter to start  ·  A/D robe, W/S hat, Q/E pet  ·  2 for two players  ·  Tab mode  ·  M sound";
   if (two) hint = "P1: WASD, Space, LShift, 1-4   ·   P2: arrows, fires by itself, Enter, 7 8 9 0";
   if (touch.enabled) hint = "Tap a button to begin. Use the pad to move; your staff aims by itself.";
   outlinedText(hint, WIDTH / 2, 600, { size: 14, align: "center", color: "#c5a988" });
@@ -9264,7 +11375,7 @@ function drawArrowButton(x, y, dir, action) {
 
 function drawUpgradeScreen() {
   dim(0.7);
-  const heading = state.picksLeft > 1 ? "Huge reward! Pick 2 power-ups" : state.picksLeft === 1 ? "One more power-up!" : "Boss defeated! Pick a power-up";
+  const heading = state.scrollPick ? "Power-up Scroll! Pick a card" : state.picksLeft > 1 ? "Huge reward! Pick 2 power-ups" : state.picksLeft === 1 ? "One more power-up!" : state.treeMode ? `Wave ${state.tree.wave} cleared! Pick a power-up` : "Boss defeated! Pick a power-up";
   outlinedText(heading, WIDTH / 2, 112, { size: 38, align: "center", font: DISPLAY_FONT, color: "#f6c85f" });
   const choices = state.upgradeChoices;
   const cw = 240;
@@ -9292,7 +11403,12 @@ function drawUpgradeScreen() {
     const lines = wrapLines(upgrade.desc, cw - 36, `600 15px ${BODY_FONT}`);
     lines.forEach((line, n) => outlinedText(line, x + cw / 2, y + 176 + n * 20, { size: 15, align: "center", weight: 600, color: "#f8ead2" }));
     const owned = state.upgradeCounts[upgrade.id] || 0;
-    if (owned) outlinedText(`Have ${owned}`, x + cw / 2, y + ch - 16, { size: 13, align: "center", color: "#c5a988" });
+    if (upgrade.max > 1 && !upgrade.evo) {
+      outlinedText(`Rank ${ROMAN[owned] || owned + 1}`, x + cw - 16, y + 30, { size: 16, align: "right", font: DISPLAY_FONT, color: upgrade.color });
+      drawRankPips(upgrade, x, y + ch - 26, cw);
+    } else if (owned) {
+      outlinedText(`Have ${owned}`, x + cw / 2, y + ch - 16, { size: 13, align: "center", color: "#c5a988" });
+    }
     hitRegions.push({ x, y, w: cw, h: ch, action: () => chooseUpgrade(i) });
   });
 
@@ -9334,6 +11450,14 @@ function drawPauseScreen() {
 function drawDeadScreen() {
   ctx.fillStyle = "rgba(30, 10, 8, 0.72)";
   ctx.fillRect(0, 0, WIDTH, HEIGHT);
+  if (state.treeMode && state.tree) {
+    const tree = state.tree;
+    outlinedText(tree.fallen ? "The Spirit Tree fell!" : state.twoPlayer ? "You both got bonked!" : "You got bonked!", WIDTH / 2, HEIGHT / 2 - 50, { size: 46, align: "center", font: DISPLAY_FONT, color: "#ff8b7d" });
+    outlinedText(`You reached wave ${tree.wave}. Best: wave ${state.bestWave}`, WIDTH / 2, HEIGHT / 2 - 10, { size: 18, align: "center", color: "#7dffb0" });
+    drawButton("Try again (R)", WIDTH / 2 - 230, HEIGHT / 2 + 30, 220, 52, startTreeMode, { primary: true });
+    drawButton("Title screen", WIDTH / 2 + 10, HEIGHT / 2 + 30, 220, 52, quitToTitle);
+    return;
+  }
   outlinedText(state.twoPlayer ? "Oops! You both got bonked!" : "Oops! You got bonked!", WIDTH / 2, HEIGHT / 2 - 40, { size: 46, align: "center", font: DISPLAY_FONT, color: "#ff8b7d" });
   const lostLine = state.lastLost > 0 ? `You dropped ${state.lastLost} coins where you fell. Go back and grab them!` : "The boss healed back up. Try a different plan!";
   outlinedText(lostLine, WIDTH / 2, HEIGHT / 2, { size: 17, align: "center", color: "#f6c85f" });
@@ -9342,8 +11466,8 @@ function drawDeadScreen() {
 
 function drawVictoryScreen() {
   dim(0.55);
-  outlinedText("Dungeon Complete!", WIDTH / 2, 96, { size: 60, align: "center", font: DISPLAY_FONT, color: "#f6c85f" });
-  outlinedText("Blocky the Dragon is your friend now.", WIDTH / 2, 134, { size: 20, align: "center", color: "#ff9ff3" });
+  outlinedText(state.treeMode ? "Spirit Tree Saved!" : "Dungeon Complete!", WIDTH / 2, 96, { size: 60, align: "center", font: DISPLAY_FONT, color: state.treeMode ? "#7dffb0" : "#f6c85f" });
+  outlinedText(state.treeMode ? `You held off all ${TREE_WAVES} waves!` : "Blocky the Dragon is your friend now.", WIDTH / 2, 134, { size: 20, align: "center", color: "#ff9ff3" });
 
   ctx.save();
   ctx.translate(WIDTH / 2 + 120, 270);
@@ -9378,11 +11502,7 @@ function drawVictoryScreen() {
     outlinedText(label, WIDTH / 2 - 190, 416 + i * 24, { size: 16, color: "#c5a988" });
     outlinedText(value, WIDTH / 2 + 190, 416 + i * 24, { size: 16, align: "right", color: "#f8ead2" });
   });
-  drawButton("Play again", WIDTH / 2 - 120, 542, 240, 52, () => {
-    writeStorage(SAVE_KEY, null);
-    state.hasSave = false;
-    state.mode = "title";
-  }, { primary: true });
+  drawButton("Play again", WIDTH / 2 - 120, 542, 240, 52, finishVictory, { primary: true });
 }
 
 function draw() {
@@ -9395,9 +11515,12 @@ function draw() {
   drawAmbient();
   if (state.mode !== "title" && state.mode !== "victory") {
     drawGroundEffects();
+    if (room.tree && state.tree) drawSpiritTree(state.tree);
     if (hasCampfire(room)) drawCampfire(room);
+    if (hasShop(room)) drawShopStall(room);
     drawLostCoins(room);
     drawPickups();
+    drawStaffDrops(room);
     drawCrates(room);
     drawFoes(room);
     if (pet && state.petChoice === "pixel") drawPet(ctx, pet.x, pet.y, pet.face, pet.hop, state.anim);
@@ -9431,6 +11554,7 @@ function draw() {
 
   if (state.mode === "title") drawTitle();
   if (state.mode === "upgrade") drawUpgradeScreen();
+  if (state.mode === "shop") drawShopScreen();
   if (state.mode === "paused") drawPauseScreen();
   if (state.mode === "dead") drawDeadScreen();
   if (state.mode === "victory") {
@@ -9457,7 +11581,7 @@ function createMiniMap() {
       const index = col < ROOM_COLS ? row * ROOM_COLS + col : ARENA_START + row;
       const cell = document.createElement("div");
       cell.className = "map-cell";
-      cell.title = col < ROOM_COLS ? `Room ${index + 1}` : `Big boss: ${bigBosses[row].name}`;
+      cell.title = col < ROOM_COLS ? `World ${row + 1} (${worlds[row].name}), chapter ${col < ROOM_PER_CHAPTER ? 1 : 2}, room ${(col % ROOM_PER_CHAPTER) + 1}` : `Big boss: ${bigBosses[row].name}`;
       ui.miniMap.appendChild(cell);
       mapCells[index] = cell;
     }
@@ -9626,6 +11750,12 @@ function renderUpgradeList() {
     li.innerHTML = `<i style="--c:${stats.petEvo ? petKinds[stats.petEvo].color : "#fb923c"}"></i>${petName()}<b>Lv ${stats.petLevel}</b>`;
     ui.upgradeList.appendChild(li);
   }
+  for (const p of activePlayers()) {
+    const li = document.createElement("li");
+    const info = staffInfo(p.staff);
+    li.innerHTML = `<i style="--c:${info.gem}"></i>${state.twoPlayer ? `P${p.index + 1}: ` : ""}${staffName(p.staff)}<b style="color:${staffRarity(p.staff).color}">${info.move}</b>`;
+    ui.upgradeList.appendChild(li);
+  }
   if (!owned.length) {
     const li = document.createElement("li");
     li.className = "empty";
@@ -9634,7 +11764,8 @@ function renderUpgradeList() {
   }
   for (const upgrade of owned) {
     const li = document.createElement("li");
-    li.innerHTML = `<i style="--c:${upgrade.color}"></i>${upgrade.name}<b>x${state.upgradeCounts[upgrade.id]}</b>`;
+    const count = state.upgradeCounts[upgrade.id];
+    li.innerHTML = `<i style="--c:${upgrade.color}"></i>${upgrade.name}<b>${upgrade.max > 1 ? `Rank ${ROMAN[count - 1] || count}` : `x${count}`}</b>`;
     ui.upgradeList.appendChild(li);
   }
   state.shownUpgradesVersion = state.upgradesVersion;
@@ -9672,13 +11803,13 @@ function updateInterface(dt) {
     if (r.visited) cls += " seen";
     if (r.visited && r.boss && r.boss.hp > 0) cls += " boss-alive";
     if (r.visited && isRoomCleared(r)) cls += " cleared";
-    if (i === 0 && state.portalOpen && !state.won) cls += " portal";
     if (i === state.roomIndex && state.mode !== "title") cls += " current";
     if (mapCells[i].className !== cls) mapCells[i].className = cls;
   }
   for (let row = 0; row < ROOM_ROWS; row += 1) {
     const index = ARENA_START + row;
     let cls = "map-cell arena";
+    if (row === ROOM_ROWS - 1 && state.portalOpen && !state.won) cls += " portal";
     if (state.bigBeaten.has(row)) cls += " beaten";
     else if (gateOpen(row)) cls += " open";
     else cls += " locked";
@@ -9688,23 +11819,26 @@ function updateInterface(dt) {
 
   const bossAlive = room.boss && room.boss.hp > 0;
   const nearby = room.enemies.filter((enemy) => enemy.hp > 0).length;
-  ui.trackRoom.textContent = room.final ? "Dragon's Lair" : room.arena ? "Big Boss Arena" : `${room.index + 1} / ${ROOM_COUNT}`;
-  ui.trackBiome.textContent = room.biome.name;
-  ui.trackBoss.textContent = !room.boss ? "Waiting" : bossAlive ? `${room.boss.name}: ${Math.ceil(room.boss.hp)} HP` : "Defeated";
+  ui.trackRoom.textContent = roomLabel(room);
+  ui.trackBiome.textContent = room.final || room.tree ? room.biome.name : `${worlds[roomRow(room)].name} · ${room.biome.name}`;
+  ui.trackBoss.textContent = !room.boss || room.boss.dummy ? "Waiting" : bossAlive ? `${room.boss.name}: ${Math.ceil(room.boss.hp)} HP` : "Defeated";
   ui.trackEnemies.textContent = `${state.enemiesDefeated} poofed, ${nearby} nearby`;
-  ui.trackBosses.textContent = `${state.bossesDefeated} / ${ROOM_COUNT}`;
+  ui.trackBosses.textContent = state.treeMode ? `Wave ${state.tree ? state.tree.wave : 0} / ${TREE_WAVES}` : `${state.bossesDefeated} / ${ROOM_COUNT}`;
   ui.trackBig.textContent = `${state.bigBeaten.size} / ${bigBosses.length}`;
   ui.trackTime.textContent = formatTime(state.time);
 
   let goal = "Defeat this room boss";
   if (state.mode === "title") goal = "Press start";
   else if (state.won) goal = "You won!";
+  else if (room.tree) goal = state.tree && state.tree.phase === "break" ? "Get ready for the next wave" : "Protect the Spirit Tree!";
   else if (room.final) goal = "Calm down Blocky the Dragon";
-  else if (room.arena) goal = bossAlive ? `Beat ${room.boss.name}!` : "Head back through the left door";
-  else if (state.portalOpen) goal = "Enter the golden portal in Room 1";
+  else if (state.portalOpen) goal = "Step into the golden portal in the last arena";
+  else if (room.arena) goal = bossAlive ? `Beat ${room.boss.name}!` : `On to World ${room.row + 2} through the right door`;
   else if (bossAlive) goal = "Defeat this room boss";
   else if (nearby > 0) goal = "Clear the remaining enemies";
-  else goal = "Choose the next room";
+  else if (isRowEnd(room) && gateOpen(roomRow(room))) goal = "Rest at the campfire, then face the big boss";
+  else if (isRowEnd(room)) goal = "Beat every boss in this world to open the gate";
+  else goal = "Head right to the next room";
   ui.trackGoal.textContent = goal;
 
   spells.forEach((spell, i) => {
@@ -9767,6 +11901,8 @@ function boot() {
     if (typeof prefs.difficulty === "number") state.difficulty = clamp(prefs.difficulty, 0, difficulties.length - 1);
     state.twoPlayer = prefs.twoPlayer === true;
     if (petTypes[prefs.pet]) state.petPick = prefs.pet;
+    if (prefs.mode === "tree") state.playMode = "tree";
+    state.bestWave = Math.max(0, prefs.bestWave | 0);
     if (Array.isArray(prefs.hats)) {
       for (const id of prefs.hats) {
         if (Number.isInteger(id) && hats[id]) state.hatsUnlocked.add(id);
@@ -9823,7 +11959,17 @@ window.blockDungeon = {
   hurtPlayer,
   togglePlayers,
   wearHat,
-  unlockHat
+  unlockHat,
+  useSpecial,
+  giveStaff,
+  openShop,
+  buyShopItem,
+  startTreeMode,
+  startWave,
+  changeRoom,
+  dropLoot,
+  summonTotem,
+  hurtTree
 };
 
 boot();
