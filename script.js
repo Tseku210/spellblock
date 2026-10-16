@@ -283,11 +283,15 @@ const bigBosses = [
 ];
 
 const difficulties = [
-  // Easy plays like the old Normal, Normal like the old Hard, and Hard is tougher still.
-  // extra = more enemies in every room.
-  { name: "Easy", hp: 1, attack: 1, damage: 1, speed: 1, extra: 0 },
-  { name: "Normal", hp: 1.35, attack: 0.82, damage: 1.2, speed: 1.06, extra: 1 },
-  { name: "Hard", hp: 1.65, attack: 0.72, damage: 1.4, speed: 1.12, extra: 2 }
+  // Easy stays gentle for little wizards; Normal and Hard are meant to be really tough.
+  // extra = more enemies in every room. mobHp = extra toughness for regular monsters.
+  // keepUp = how much of your real damage the next boss's HP keeps up with.
+  // shot = enemy bullet speed. guards = helpers a room boss calls when it gets angry.
+  // bossHit = extra damage from room bosses. volley = extra bullets in a boss's aimed fan.
+  // elite = chance a monster is a gold Elite (see makeElite). mobPace = how fast monsters attack.
+  { name: "Easy", hp: 1, mobHp: 1.4, attack: 1, damage: 1, speed: 1, extra: 0, keepUp: 0.7, shot: 1, guards: 0, bossHit: 1, volley: 0, elite: 0.05, mobPace: 1 },
+  { name: "Normal", hp: 1.5, mobHp: 2.4, attack: 0.72, damage: 1.35, speed: 1.1, extra: 1, keepUp: 1, shot: 1.12, guards: 2, bossHit: 1.15, volley: 0, elite: 0.17, mobPace: 1.1 },
+  { name: "Hard", hp: 1.85, mobHp: 3.2, attack: 0.6, damage: 1.6, speed: 1.16, extra: 2, keepUp: 1.15, shot: 1.22, guards: 3, bossHit: 1.35, volley: 2, elite: 0.25, mobPace: 1.35 }
 ];
 
 // The staff is a backup weapon: weak to start and slow to upgrade. Spells do the big damage.
@@ -547,15 +551,19 @@ function playerDps() {
 // Bosses soak up most of the staff upgrades so later fights stay a challenge,
 // but 30% of every upgrade still shows, so power-ups always feel good.
 // Two wizards deal about twice the damage, so bosses get tougher in co-op.
+// How much stronger your spells have grown (spell power, cast speed, evolutions).
+function spellGrowth() {
+  return (1 + (stats.spellBoost / stats.castSpeed - 1) * 0.5) * (1 + 0.1 * (Object.keys(stats.evo).length + Object.keys(stats.mega).length));
+}
+
 function bossHpFor(tier, seconds = 6 + tier * 0.5, final = false) {
-  const spellGain = (1 + (stats.spellBoost / stats.castSpeed - 1) * 0.5) * (1 + 0.1 * (Object.keys(stats.evo).length + Object.keys(stats.mega).length));
-  const effective = (BOSS_DPS + Math.max(0, playerDps() - STAFF_DPS) * 0.7) * spellGain;
+  const effective = (BOSS_DPS + Math.max(0, playerDps() - STAFF_DPS) * 0.7) * spellGrowth();
   const planned = effective * seconds * difficulty().hp * coopScale(1.6);
   // Bosses also remember how fast you beat the last few. If your spells and
   // combos melt them faster than planned, the next ones get tougher to match.
-  // Strong builds still win a bit faster (85% on Normal), so upgrades feel good.
-  // Final bosses (big bosses and the dragon) get no discount at all.
-  const keepUp = final ? 1.05 : [0.7, 0.85, 1][state.difficulty] || 0.85;
+  // On Easy strong builds still win faster; on Normal and Hard bosses keep up.
+  // Final bosses (big bosses and the dragon) never give a discount.
+  const keepUp = Math.max(final ? 1.05 : 0, difficulty().keepUp || 1);
   const measured = state.powerDps * seconds * keepUp;
   return Math.round(Math.min(planned * 3, Math.max(planned, measured)));
 }
@@ -1051,8 +1059,9 @@ function makeEnemy(typeIndex, x, y, options = {}) {
   const tier = options.tier || 0;
   const isBoss = Boolean(options.boss);
   const small = Boolean(options.small);
-  const powerScale = 1 + Math.max(0, playerDps() / STAFF_DPS - 1) * 0.5;
-  let maxHp = Math.round(type.hp * (1 + tier * 0.07) * (small ? 0.45 : 1) * powerScale * difficulty().hp * coopScale(1.3));
+  // Monsters grow with your staff and your spells, so they never melt in one hit.
+  const powerScale = (1 + Math.max(0, playerDps() / STAFF_DPS - 1) * 0.5) * spellGrowth();
+  let maxHp = Math.round(type.hp * (1 + tier * 0.07) * (small ? 0.45 : 1) * powerScale * difficulty().hp * (difficulty().mobHp || 1) * coopScale(1.3));
   if (isBoss) maxHp = bossHpFor(tier);
   const roomIndex = options.roomIndex || 0;
 
@@ -1068,7 +1077,7 @@ function makeEnemy(typeIndex, x, y, options = {}) {
     hp: maxHp,
     maxHp,
     speed: type.speed * (isBoss ? 0.72 : small ? 1.25 : 1) * (1 + tier * 0.012) * (difficulty().speed || 1),
-    damage: Math.round((type.damage * (1 + tier * 0.035) + (isBoss ? 4 : 0)) * difficulty().damage),
+    damage: Math.round((type.damage * (1 + tier * 0.035) + (isBoss ? 4 : 0)) * difficulty().damage * (isBoss ? difficulty().bossHit || 1 : 1)),
     behavior: type.behavior,
     isBoss,
     small,
@@ -1284,6 +1293,7 @@ function populateRoom(room, entry, tier) {
     if ((behavior === "lantern" || behavior === "pack") && room.enemies.some((enemy) => enemy.behavior === behavior)) typeIndex = (room.index * 5 + i * 3) % BOSS_TYPE_COUNT;
     const spot = findSpawn(room, rng, entry, 230);
     room.enemies.push(makeEnemy(typeIndex, spot.x, spot.y, { tier }));
+    if (tier >= 1 && Math.random() < (difficulty().elite || 0)) makeElite(room.enemies[room.enemies.length - 1]);
     // Wolves never hunt alone.
     if (enemyTypes[typeIndex].behavior === "pack") room.enemies.push(makeEnemy(typeIndex, clamp(spot.x + 34, TILE + 40, WIDTH - TILE - 40), spot.y + 10, { tier }));
   }
@@ -2962,6 +2972,11 @@ function damageEnemy(enemy, amount, source = "staff") {
     amount *= 0.25;
     if (Math.random() < 0.15) floatText(enemy.x, enemy.y - enemy.size, "Shielded!", "#7dffb0", 13);
   }
+  if (enemy.armor > 0) {
+    enemy.armor -= amount;
+    amount *= 0.4;
+    if (enemy.armor <= 0) breakArmor(enemy);
+  }
   const damage = Math.max(1, Math.round(amount * (isStunned(enemy) ? 1.5 : 1)));
   enemy.hp -= damage;
   const burn = source === "burn";
@@ -3038,6 +3053,10 @@ function defeatEnemy(enemy) {
     dropLoot(enemy.x, enemy.y, "coin", coins);
     if (Math.random() < 0.1 + stats.luck) dropLoot(enemy.x, enemy.y, "star", 1);
     if (Math.random() < (enemy.temp ? 0.15 : 0.5)) dropLoot(enemy.x, enemy.y, "spirit", 1);
+    if (enemy.elite) {
+      dropLoot(enemy.x, enemy.y, "coin", 4);
+      dropLoot(enemy.x, enemy.y, "spirit", 1);
+    }
   }
 
   if (!state.treeMode && !room.cleared && isRoomCleared(room)) {
@@ -3142,6 +3161,40 @@ function startPhase2(boss, room) {
   banners.length = 0;
   banner(boss.name, "Phase two! It's not over yet!", "#ff5a3d", 3);
   toast(big.rageLine, 2.6);
+}
+
+// Elite monsters glow gold: bigger, tougher, faster, and wrapped in armor.
+// While the armor holds they only take 40% damage, so break it first.
+function makeElite(enemy) {
+  enemy.elite = true;
+  enemy.maxHp = Math.round(enemy.maxHp * 1.8);
+  enemy.hp = enemy.maxHp;
+  enemy.armor = enemy.maxArmor = Math.round(enemy.maxHp * 0.6);
+  enemy.size = Math.round(enemy.size * 1.25);
+  enemy.speed *= 1.1;
+  enemy.damage = Math.round(enemy.damage * 1.3);
+}
+
+function breakArmor(enemy) {
+  enemy.armor = 0;
+  floatText(enemy.x, enemy.y - enemy.size - 10, "Armor broke!", "#ffd166", 16);
+  burst(enemy.x, enemy.y, ["#ffd166", "#c9d3e0", "#ffffff"], 18, 220);
+  addRing(enemy.x, enemy.y, enemy.size, "#ffd166", 0.3, 5);
+  sfx.slam();
+}
+
+// On Normal and Hard an angry room boss calls in a few of its own kind to help.
+function callGuards(boss, room, count) {
+  for (let i = 0; i < count; i += 1) {
+    const angle = (i / count) * Math.PI * 2 + Math.random();
+    const x = clamp(boss.x + Math.cos(angle) * 90, TILE + 30, WIDTH - TILE - 30);
+    const y = clamp(boss.y + Math.sin(angle) * 90, TILE + 30, HEIGHT - TILE - 30);
+    const guard = makeEnemy(boss.typeIndex, x, y, { tier: room.tier, temp: true });
+    guard.attackTimer = 1.5;
+    room.enemies.push(guard);
+    burst(guard.x, guard.y, [guard.type.color, "#ffffff"], 10, 140);
+  }
+  if (count) toast(`${boss.name} called the guards!`, 2);
 }
 
 function startLastStand(boss, room) {
@@ -5549,7 +5602,7 @@ function updatePet(dt) {
 }
 
 function bulletSpeed(room) {
-  return Math.min(255, 190 + room.tier * 2.2);
+  return Math.min(255, 190 + room.tier * 2.2) * (difficulty().shot || 1);
 }
 
 function enemyShot(enemy, angle, speed, options = {}) {
@@ -5596,7 +5649,12 @@ function updateFoes(dt) {
     if (isStunned(enemy)) {
       if (Math.random() < dt * 6) burst(enemy.x, enemy.y - enemy.size / 2, ["#f6c85f", "#ffffff"], 1, 40, { lift: 30 });
     } else if (enemy.isBoss) updateBoss(enemy, dt, ux, uy, dist, slow, room);
-    else updateMinion(enemy, dt, ux, uy, dist, step, room, target);
+    else {
+      // On harder settings (and for Elites) monsters wind up their attacks sooner.
+      const pace = (difficulty().mobPace || 1) * (enemy.elite ? 1.2 : 1);
+      if (pace > 1 && enemy.attackTimer > 0) enemy.attackTimer -= dt * (pace - 1);
+      updateMinion(enemy, dt, ux, uy, dist, step, room, target);
+    }
 
     if (enemy.hp <= 0) continue;
 
@@ -6196,8 +6254,9 @@ function updateBoss(boss, dt, ux, uy, dist, slow, room) {
       boss.speed *= 1.15;
       addRing(boss.x, boss.y, 180, boss.shotColor, 0.5, 10);
       sfx.roar();
-    } else if (!boss.isDragon && room.tier >= 6 && !boss.totemDone) {
-      summonTotem(boss, room);
+    } else if (!boss.isDragon) {
+      if (room.tier >= 6 && !boss.totemDone) summonTotem(boss, room);
+      callGuards(boss, room, difficulty().guards || 0);
     }
   }
   if (boss.isBig && boss.phase2 && !boss.totemDone && boss.hp < boss.maxHp * 0.5) summonTotem(boss, room);
@@ -6531,7 +6590,7 @@ function runBossPattern(boss, phase2, room, ux, uy) {
   const color = boss.shotColor || (boss.isDragon ? "#ff9b3d" : "#cf3fff");
 
   if (pattern === "aim") {
-    const count = (phase2 ? 5 : 3) + Math.floor(room.tier / 8) * 2;
+    const count = (phase2 ? 5 : 3) + Math.floor(room.tier / 8) * 2 + (difficulty().volley || 0);
     const lead = leadAngle(boss, bossTarget(boss), speed);
     for (let i = 0; i < count; i += 1) enemyShot(boss, lead + (i - (count - 1) / 2) * 0.22, speed, { color });
     sfx.enemyShot();
@@ -8852,12 +8911,57 @@ function drawFoes(room) {
       ctx.arc(enemy.x, enemy.y, enemy.size * 0.85 + Math.sin(state.anim * 6) * 6, 0, Math.PI * 2);
       ctx.stroke();
     }
+    if (enemy.elite) drawEliteAura(enemy);
     if (enemy.isBig) drawBigBossFoe(enemy);
     else drawEnemy(enemy);
+    if (enemy.elite) drawEliteMarks(enemy);
     if (enemy.totem || enemy.isBoss) drawTotemMarks(enemy);
     if (enemy.state === "tell") drawTell(enemy);
     if (isStunned(enemy)) drawStunStars(enemy.x, enemy.y - enemy.size * (enemy.isBig ? 0.95 : 0.7) - (enemy.hop || 0), enemy.isBoss ? 1.3 : 1);
   }
+}
+
+// A pulsing gold frame under an Elite, in 2px blocks to match the sprites.
+function drawEliteAura(enemy) {
+  const pulse = Math.floor(state.anim * 6) % 2;
+  const r = Math.round(enemy.size * 0.62 / 2) * 2 + pulse * 2;
+  const x = Math.round(enemy.x);
+  const y = Math.round(enemy.y);
+  ctx.globalAlpha = 0.2 * (enemy.alpha ?? 1);
+  ctx.fillStyle = "#ffd166";
+  ctx.fillRect(x - r, y - r, r * 2, r * 2);
+  // Gold corner brackets.
+  ctx.globalAlpha = enemy.alpha ?? 1;
+  const e = r + 4;
+  const arm = 8;
+  for (const [sx, sy] of [[-1, -1], [1, -1], [-1, 1], [1, 1]]) {
+    ctx.fillRect(sx < 0 ? x - e : x + e - arm, sy < 0 ? y - e : y + e - 2, arm, 2);
+    ctx.fillRect(sx < 0 ? x - e : x + e - 2, sy < 0 ? y - e : y + e - arm, 2, arm);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// A little gold crown, plus a grey-blue armor bar while the armor holds.
+function drawEliteMarks(enemy) {
+  const top = Math.round(enemy.y - enemy.size / 2);
+  const x = Math.round(enemy.x);
+  ctx.globalAlpha = enemy.alpha ?? 1;
+  if (enemy.armor > 0) {
+    const w = Math.max(24, enemy.size * 1.5);
+    ctx.fillStyle = "#1b100c";
+    ctx.fillRect(x - w / 2, top - 17, w, 5);
+    ctx.fillStyle = "#c9d3e0";
+    ctx.fillRect(x - w / 2, top - 17, w * Math.max(0, enemy.armor / enemy.maxArmor), 5);
+  }
+  const cy = top - (enemy.armor > 0 ? 28 : 20);
+  ctx.fillStyle = "#ffd166";
+  ctx.fillRect(x - 6, cy + 4, 12, 4);
+  ctx.fillRect(x - 6, cy, 2, 4);
+  ctx.fillRect(x - 1, cy - 2, 2, 6);
+  ctx.fillRect(x + 4, cy, 2, 4);
+  ctx.fillStyle = "#ef5b4b";
+  ctx.fillRect(x - 1, cy + 4, 2, 2);
+  ctx.globalAlpha = 1;
 }
 
 // A blocky sword held out from the boss's side.
