@@ -1,0 +1,154 @@
+/* Feedback button and form (see feedback.js). Uses the game's colors from style.css. */
+
+.feedback-btn {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.feedback-dialog {
+  width: min(460px, calc(100vw - 32px));
+  max-height: calc(100vh - 32px);
+  padding: 0;
+  border: 4px solid var(--line);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 10px 0 var(--shadow);
+}
+
+.feedback-dialog::backdrop {
+  background: rgba(10, 8, 6, 0.72);
+}
+
+.feedback-form {
+  display: grid;
+  gap: 14px;
+  padding: 18px;
+}
+
+.feedback-form h2 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 1.5rem;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.feedback-sub {
+  margin: -8px 0 0;
+}
+
+.feedback-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.feedback-kinds legend {
+  margin-bottom: 6px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.feedback-kinds label {
+  cursor: pointer;
+}
+
+.feedback-kinds input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.feedback-kinds span {
+  display: inline-block;
+  padding: 6px 12px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  font: 600 0.9rem system-ui, sans-serif;
+  box-shadow: 0 3px 0 #0d0a08;
+}
+
+.feedback-kinds input:checked + span {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.feedback-kinds input:focus-visible + span {
+  outline: 2px solid var(--blue);
+  outline-offset: 2px;
+}
+
+.feedback-field {
+  display: grid;
+  gap: 6px;
+  font-size: 0.9rem;
+}
+
+.feedback-field small {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.feedback-count {
+  justify-self: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.feedback-field textarea,
+.feedback-field input {
+  width: 100%;
+  padding: 10px;
+  border: 3px solid #110d0a;
+  background: #100d0b;
+  color: var(--text);
+  font: 1rem system-ui, sans-serif;
+  resize: vertical;
+}
+
+.feedback-field textarea:focus,
+.feedback-field input:focus {
+  outline: none;
+  border-color: var(--gold);
+}
+
+/* Hidden spam trap: real players never see or fill it. */
+.feedback-trap {
+  position: absolute;
+  left: -9999px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+
+.feedback-status {
+  min-height: 1.2em;
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.feedback-status[data-tone="ok"] {
+  color: var(--green);
+}
+
+.feedback-status[data-tone="error"] {
+  color: #ff8a7a;
+}
+
+.feedback-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+.feedback-send {
+  border-color: var(--gold);
+  background: #4a3517;
+  color: var(--gold);
+}
+
+.feedback-send:disabled {
+  opacity: 0.6;
+  cursor: wait;
+}

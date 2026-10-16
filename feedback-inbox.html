@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="robots" content="noindex, nofollow">
+  <title>Feedback Inbox</title>
+  <style>
+    :root {
+      --bg: #15120f;
+      --panel: #241c17;
+      --panel-2: #30251d;
+      --text: #f8ead2;
+      --muted: #c5a988;
+      --line: #5b412d;
+      --gold: #f6c85f;
+      --green: #4fb75c;
+      --red: #ff8a7a;
+      color-scheme: dark;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 15px/1.45 system-ui, -apple-system, "Segoe UI", sans-serif;
+    }
+    main { width: min(820px, calc(100vw - 32px)); margin: 24px auto 48px; }
+    h1 { margin: 0 0 4px; color: var(--gold); font-size: 1.6rem; }
+    .muted { color: var(--muted); }
+    .bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 16px 0; }
+    input, button, select {
+      padding: 7px 10px;
+      border: 2px solid var(--line);
+      background: var(--panel-2);
+      color: var(--text);
+      font: inherit;
+    }
+    input { flex: 1 1 220px; background: #100d0b; }
+    button { cursor: pointer; font-weight: 600; }
+    button:hover { border-color: var(--gold); }
+    .status { min-height: 1.4em; color: var(--muted); }
+    .status.error { color: var(--red); }
+    .item {
+      margin: 0 0 12px;
+      padding: 12px 14px;
+      border: 3px solid var(--line);
+      background: var(--panel);
+    }
+    .item header { display: flex; flex-wrap: wrap; gap: 8px; align-items: baseline; margin-bottom: 6px; }
+    .kind { padding: 1px 8px; border: 2px solid var(--line); font-size: 0.8rem; font-weight: 700; text-transform: uppercase; }
+    .kind.idea { color: var(--gold); border-color: var(--gold); }
+    .kind.bug { color: var(--red); border-color: var(--red); }
+    .when { margin-left: auto; color: var(--muted); font-size: 0.85rem; font-variant-numeric: tabular-nums; }
+    .message { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+    .context { margin-top: 8px; color: var(--muted); font-size: 0.82rem; }
+    .item .delete { padding: 2px 8px; font-size: 0.8rem; }
+  </style>
+</head>
+<body>
+  <main>
+    <h1>Feedback Inbox</h1>
+    <p class="muted">Ideas, bugs and requests sent from the game's Feedback button.</p>
+    <form class="bar" id="keyForm">
+      <input id="key" type="password" placeholder="Inbox key" autocomplete="current-password" aria-label="Inbox key">
+      <button type="submit">Open</button>
+      <select id="filter" aria-label="Show">
+        <option value="">Everything</option>
+        <option value="idea">Ideas</option>
+        <option value="bug">Bugs</option>
+        <option value="other">Other</option>
+      </select>
+    </form>
+    <p id="status" class="status"></p>
+    <section id="list"></section>
+  </main>
+  <script>
+    const STORE = "spellblock-feedback-key";
+    const els = {
+      form: document.getElementById("keyForm"),
+      key: document.getElementById("key"),
+      filter: document.getElementById("filter"),
+      status: document.getElementById("status"),
+      list: document.getElementById("list")
+    };
+    let items = [];
+
+    function remember(key) {
+      try { localStorage.setItem(STORE, key); } catch {}
+    }
+    function recall() {
+      try { return localStorage.getItem(STORE) || ""; } catch { return ""; }
+    }
+    function say(text, error = false) {
+      els.status.textContent = text;
+      els.status.className = error ? "status error" : "status";
+    }
+
+    async function api(method, query = "") {
+      const response = await fetch(`/api/feedback${query}`, {
+        method,
+        headers: { authorization: `Bearer ${els.key.value}` }
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.ok) throw new Error(data.error || `Error ${response.status}`);
+      return data;
+    }
+
+    async function load() {
+      if (!els.key.value) return say("Type the inbox key to open it.");
+      say("Loading...");
+      try {
+        const data = await api("GET", "?limit=500");
+        items = data.items;
+        remember(els.key.value);
+        render();
+      } catch (error) {
+        items = [];
+        render();
+        say(error.message, true);
+      }
+    }
+
+    function describe(context) {
+      if (!context) return "";
+      const bits = [];
+      if (context.screen) bits.push(`screen ${context.screen}`);
+      if (context.room) bits.push(`room ${context.room}`);
+      if (context.bosses != null) bits.push(`${context.bosses} bosses beaten`);
+      if (context.difficulty) bits.push(context.difficulty);
+      if (context.players) bits.push(`${context.players} player${context.players > 1 ? "s" : ""}`);
+      if (context.touch) bits.push("touch screen");
+      if (context.screenSize) bits.push(context.screenSize);
+      return bits.join(" · ");
+    }
+
+    function render() {
+      const shown = items.filter((item) => !els.filter.value || item.kind === els.filter.value);
+      els.list.replaceChildren(...shown.map((item) => {
+        const card = document.createElement("article");
+        card.className = "item";
+        const head = document.createElement("header");
+        const kind = document.createElement("span");
+        kind.className = `kind ${item.kind}`;
+        kind.textContent = item.kind;
+        const who = document.createElement("strong");
+        who.textContent = item.nickname || "Anonymous";
+        const when = document.createElement("span");
+        when.className = "when";
+        when.textContent = new Date(item.created_at).toLocaleString();
+        const del = document.createElement("button");
+        del.className = "delete";
+        del.type = "button";
+        del.textContent = "Delete";
+        del.addEventListener("click", async () => {
+          if (!confirm("Delete this message?")) return;
+          try {
+            await api("DELETE", `?id=${item.id}`);
+            items = items.filter((other) => other.id !== item.id);
+            render();
+          } catch (error) {
+            say(error.message, true);
+          }
+        });
+        head.append(kind, who, when, del);
+        const message = document.createElement("p");
+        message.className = "message";
+        message.textContent = item.message;
+        card.append(head, message);
+        const context = describe(item.context);
+        if (context) {
+          const line = document.createElement("div");
+          line.className = "context";
+          line.textContent = context;
+          card.append(line);
+        }
+        return card;
+      }));
+      if (items.length) say(`${shown.length} of ${items.length} message${items.length === 1 ? "" : "s"}.`);
+      else if (!els.status.classList.contains("error")) say("No messages yet.");
+    }
+
+    els.form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      load();
+    });
+    els.filter.addEventListener("change", render);
+
+    els.key.value = recall();
+    if (els.key.value) load();
+  </script>
+</body>
+</html>
