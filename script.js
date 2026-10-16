@@ -652,6 +652,8 @@ const AUTO_REVIVE = 12;
 const projectiles = [];
 const effects = [];
 const particles = [];
+// Dead particles wait here to be reused, so busy fights make less garbage.
+const particlePool = [];
 const floatTexts = [];
 const pickups = [];
 const ambient = [];
@@ -2108,21 +2110,21 @@ function burst(x, y, colors, count = 12, speed = 160, options = {}) {
   for (let i = 0; i < count; i += 1) {
     const angle = Math.random() * Math.PI * 2;
     const velocity = rand(speed * 0.3, speed);
-    particles.push({
-      x,
-      y,
-      vx: Math.cos(angle) * velocity,
-      vy: Math.sin(angle) * velocity - (options.lift || 0),
-      life: rand(0.35, 0.75) * (options.lifeScale || 1),
-      max: 0.75 * (options.lifeScale || 1),
-      size: rand(3, 7) * (options.sizeScale || 1),
-      color: Array.isArray(colors) ? pick(colors) : colors,
-      gravity: options.gravity || 0,
-      drag: options.drag ?? 0.9,
-      spin: options.spin ? rand(-8, 8) : 0,
-      angle: 0,
-      heart: Boolean(options.heart)
-    });
+    const p = particlePool.pop() || {};
+    p.x = x;
+    p.y = y;
+    p.vx = Math.cos(angle) * velocity;
+    p.vy = Math.sin(angle) * velocity - (options.lift || 0);
+    p.life = rand(0.35, 0.75) * (options.lifeScale || 1);
+    p.max = 0.75 * (options.lifeScale || 1);
+    p.size = rand(3, 7) * (options.sizeScale || 1);
+    p.color = Array.isArray(colors) ? pick(colors) : colors;
+    p.gravity = options.gravity || 0;
+    p.drag = options.drag ?? 0.9;
+    p.spin = options.spin ? rand(-8, 8) : 0;
+    p.angle = 0;
+    p.heart = Boolean(options.heart);
+    particles.push(p);
   }
 }
 
@@ -5396,9 +5398,14 @@ function updateParticles(dt) {
     p.y += p.vy * dt;
     p.angle += p.spin * dt;
   }
-  for (let i = particles.length - 1; i >= 0; i -= 1) {
-    if (particles[i].life <= 0) particles.splice(i, 1);
+  // Keep the living ones in order and hand the dead ones back to the pool.
+  let alive = 0;
+  for (let i = 0; i < particles.length; i += 1) {
+    const p = particles[i];
+    if (p.life > 0) particles[alive++] = p;
+    else if (particlePool.length < 800) particlePool.push(p);
   }
+  particles.length = alive;
 }
 
 function updateFloatTexts(dt) {
@@ -6895,7 +6902,9 @@ function drawDragon(g, d, t) {
 }
 
 function drawFoes(room) {
-  for (const enemy of [...room.enemies, room.boss]) {
+  const count = room.enemies.length;
+  for (let i = 0; i <= count; i += 1) {
+    const enemy = i < count ? room.enemies[i] : room.boss;
     if (!enemy) continue;
     if (enemy.isDragon) {
       if (enemy.hp > 0 || enemy.friendly) {
@@ -7637,6 +7646,51 @@ function drawMonsterTell(enemy) {
   }
 }
 
+// Scratch canvases for tinting a boss figure without ctx.filter.
+const tintCanvas = document.createElement("canvas");
+const tintCtx = tintCanvas.getContext("2d");
+const tintMask = document.createElement("canvas");
+const tintMaskCtx = tintMask.getContext("2d");
+
+function drawTintedFigure(enemy, cx, cy, size, look, hue, flash) {
+  const box = Math.ceil(size * 6);
+  if (tintCanvas.width < box || tintCanvas.height < box) {
+    tintCanvas.width = tintCanvas.height = box;
+    tintMask.width = tintMask.height = box;
+  }
+  const n = tintCanvas.width;
+  const half = n / 2;
+  const left = Math.round(cx - half);
+  const top = Math.round(cy - half);
+  tintCtx.clearRect(0, 0, n, n);
+  drawBossFigure(tintCtx, enemy, half + (cx - half - left), half + (cy - half - top), size, enemy.wobble, look);
+  if (hue) {
+    // A silhouette in the tint color, then blended in as "color" so shading stays.
+    tintMaskCtx.globalCompositeOperation = "source-over";
+    tintMaskCtx.clearRect(0, 0, n, n);
+    tintMaskCtx.fillStyle = hue;
+    tintMaskCtx.fillRect(0, 0, n, n);
+    tintMaskCtx.globalCompositeOperation = "destination-in";
+    tintMaskCtx.drawImage(tintCanvas, 0, 0);
+    tintCtx.globalCompositeOperation = "color";
+    tintCtx.globalAlpha = 0.8;
+    tintCtx.drawImage(tintMask, 0, 0);
+    tintCtx.globalAlpha = 1;
+  }
+  if (flash) {
+    // Adding the figure onto itself almost doubles its brightness, like a hit flash.
+    tintMaskCtx.globalCompositeOperation = "source-over";
+    tintMaskCtx.clearRect(0, 0, n, n);
+    tintMaskCtx.drawImage(tintCanvas, 0, 0);
+    tintCtx.globalCompositeOperation = "lighter";
+    tintCtx.globalAlpha = 0.9;
+    tintCtx.drawImage(tintMask, 0, 0);
+    tintCtx.globalAlpha = 1;
+  }
+  tintCtx.globalCompositeOperation = "source-over";
+  ctx.drawImage(tintCanvas, left, top);
+}
+
 function drawEnemy(enemy) {
   const size = enemy.size;
   const shakeX = enemy.state === "windup" ? rand(-2, 2) : 0;
@@ -7657,14 +7711,13 @@ function drawEnemy(enemy) {
   if (enemy.state === "fuse") extra.fuse = enemy.stateTimer / 0.9;
   const figure = enemy.isBoss && BOSS_LOOKS[enemy.typeIndex];
   if (figure) {
-    // Figures flash, freeze and get poisoned with a color filter instead of a square overlay.
-    const tints = [];
-    if (enemy.flash > 0) tints.push("brightness(1.9)");
-    if (state.clock < enemy.slowUntil) tints.push("saturate(0.5) hue-rotate(160deg)");
-    else if (state.clock < (enemy.poisonUntil || 0)) tints.push("sepia(0.4) hue-rotate(50deg)");
-    if (tints.length) ctx.filter = tints.join(" ");
-    drawBossFigure(ctx, enemy, cx, cy, size, enemy.wobble, { x: dx / d, y: dy / d });
-    ctx.filter = "none";
+    // Figures flash, freeze and get poisoned by recoloring just their own pixels.
+    // (ctx.filter looked the same but made boss fights about 20x slower to draw.)
+    const look = { x: dx / d, y: dy / d };
+    const frozen = state.clock < enemy.slowUntil;
+    const poisoned = !frozen && state.clock < (enemy.poisonUntil || 0);
+    if (enemy.flash > 0 || frozen || poisoned) drawTintedFigure(enemy, cx, cy, size, look, frozen ? "#6fd6ff" : poisoned ? "#8fdc4a" : null, enemy.flash > 0);
+    else drawBossFigure(ctx, enemy, cx, cy, size, enemy.wobble, look);
   } else drawFoeBody(ctx, enemy.typeIndex, cx, cy, size, enemy.wobble, { x: dx / d, y: dy / d }, extra);
 
   if (enemy.flash > 0 && !figure) {
@@ -8416,10 +8469,42 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+// Damage numbers repeat a lot, so each one is drawn once into a small image and reused.
+const floatTextCache = new Map();
+
+function floatTextImage(text, size, color) {
+  const key = `${text}|${size}|${color}`;
+  let img = floatTextCache.get(key);
+  if (img) return img;
+  if (floatTextCache.size > 300) floatTextCache.clear();
+  const font = `700 ${size}px ${BODY_FONT}`;
+  const line = Math.max(3, size / 5);
+  const pad = Math.ceil(line);
+  const canvasImg = document.createElement("canvas");
+  const g = canvasImg.getContext("2d");
+  g.font = font;
+  canvasImg.width = Math.ceil(g.measureText(text).width + pad * 2);
+  canvasImg.height = Math.ceil(size * 1.5 + pad * 2);
+  g.font = font;
+  g.textAlign = "center";
+  g.textBaseline = "alphabetic";
+  g.lineJoin = "round";
+  g.lineWidth = line;
+  g.strokeStyle = "#120c08";
+  const baseline = Math.ceil(size * 1.1) + pad;
+  g.strokeText(text, canvasImg.width / 2, baseline);
+  g.fillStyle = color;
+  g.fillText(text, canvasImg.width / 2, baseline);
+  img = { canvas: canvasImg, ox: canvasImg.width / 2, oy: baseline };
+  floatTextCache.set(key, img);
+  return img;
+}
+
 function drawFloatTexts() {
   for (const t of floatTexts) {
     ctx.globalAlpha = clamp(t.life / 0.4, 0, 1);
-    outlinedText(t.text, t.x, t.y, { size: t.size, color: t.color, align: "center" });
+    const img = floatTextImage(t.text, t.size, t.color);
+    ctx.drawImage(img.canvas, Math.round(t.x - img.ox), Math.round(t.y - img.oy));
   }
   ctx.globalAlpha = 1;
 }
