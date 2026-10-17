@@ -44,6 +44,7 @@
   }
   // Draw rows of letters with (x, y) = bottom-centre of the sprite. big = Scale2x first.
   function stamp(g, rows, pal, x, y, flip = false, big = false) {
+    if (house("stamp", g, STAMP_NAMES.get(rows), x, y, flip, big)) return;
     if (big) rows = scale2x(rows);
     const w = Math.max(...rows.map((r) => r.length));
     const x0 = snap(x - (w * P) / 2), y0 = snap(y - rows.length * P);
@@ -401,6 +402,13 @@
   ];
   S.iceRockPal = { k: "#3a4a5a", W: "#ffffff", L: "#a8b4c0", M: "#7a8a9a", D: "#5a6a7a" };
 
+  // House style (props.js) can take over a prop painter or a stamped sprite by name.
+  const STAMP_NAMES = new Map(Object.entries(S).filter(([, v]) => Array.isArray(v)).map(([k, v]) => [v, k]));
+  function house(name, ...args) {
+    const f = window.houseProps && window.houseProps[name];
+    return Boolean(f && f(...args));
+  }
+
   // A boulder with an outline, a lit top, a dark side, cracks and maybe moss.
   function boulder(g, rng, cx, cy, r, pal, moss) {
     const pts = [];
@@ -491,6 +499,7 @@
 
   // A 3/4-view stepped pyramid with a door and a gold cap.
   function pyramid(g, cx, by, half, h) {
+    g = g.raw || g; // keep its fine step shading off the house palette
     shadow(g, cx + half * 0.4, by + 4, half * 1.15, 12, 0.3);
     for (let py = 0; py < h; py += 2) {
       const w = half * (1 - py / h);
@@ -715,6 +724,7 @@
   }
   // A layered pine with an outline, light and dark sides and snow on each tier.
   function pineTree(g, x, y, s, snowy) {
+    if (house("pineTree", g, x, y, s, snowy)) return;
     shadow(g, x + 6, y + 2, 16 * s, 5 * s, 0.25);
     for (let yy = -10; yy <= 0; yy += 2) for (let xx = -4; xx <= 4; xx += 2) { g.fillStyle = Math.abs(xx) === 4 ? "#2a1a0e" : xx < 0 ? "#8a5a32" : "#5a3a22"; g.fillRect(snap(x + xx), snap(y + yy), 2, 2); }
     const tiers = [[-8, 18, 14], [-20, 15, 13], [-31, 12, 12], [-41, 8, 11]];
@@ -779,6 +789,7 @@
   }
   // A round leafy tree: trunk plus a canopy of overlapping blobs with an outline and leaf clumps.
   function oakTree(g, rng, x, y, r, opts = {}) {
+    if (house("oakTree", g, rng, x, y, r, opts)) return;
     const pal = opts.pal || { k: "#173a1c", D: "#2a6a2e", M: "#3f8a3a", L: "#6cc04f", H: "#a8e870" };
     shadow(g, x + 6, y + 2, r * 1.1, r * 0.35, 0.3);
     // Trunk.
@@ -817,6 +828,7 @@
   }
   // Weeping willow: a dome of leaves with long strands hanging almost to the ground.
   function willowTree(g, rng, x, y, r) {
+    if (house("willowTree", g, rng, x, y, r)) return;
     shadow(g, x + 6, y + 2, r * 1.3, r * 0.4, 0.3);
     const top = y - r * 2.1;
     // Trunk, mostly hidden by strands.
@@ -1056,7 +1068,8 @@
       if (inClear(L, x + dx, y + dy)) return false;
       if (cellAt(L, x + dx, y + dy) !== FLOOR) return false;
     }
-    for (const q of L.props) if (Math.hypot(q.x - x, (q.y - y) * 1.3) < (q.r + r) * 0.8) return false;
+    // Far enough apart that neighbours don't pile onto each other.
+    for (const q of L.props) if (Math.hypot(q.x - x, (q.y - y) * 1.3) < (q.r + r) * 1.25) return false;
     if (!onRails) for (const [kx, ky, kr] of L.keep) if (Math.hypot(kx - x, ky - y) < kr + r * 0.8) return false;
     L.props.push({ x, y, r, draw });
     if (box) L.solids.push([x + box[0], y + box[1], box[2], box[3]]);
@@ -1332,6 +1345,8 @@
     for (let i = 0; i < n; i += 1) {
       const x = snap(T + 8 + rng() * (W - 2 * T - 16)), y = snap(T + 8 + rng() * (H - 2 * T - 16));
       if (cellAt(L, x, y) !== FLOOR || nearCamp(L, x, y)) continue;
+      // Keep small details out from under tree canopies and off big props.
+      if (L.props.some((q) => Math.abs(x - q.x) < q.r + 12 && y > q.y - q.r * 3.6 && y < q.y + 14)) continue;
       fn(x, y, rng);
     }
   }
@@ -1883,9 +1898,12 @@
     if (L.has[QUICK]) paintQuick(g, L);
     if (L.has[SNOW]) paintSnow(g, L);
     paintBridges(g, L);
-    kit.details(g, L, rng);
+    // Props and details snap to the house palette when props.js is loaded.
+    const hg = window.houseProps ? window.houseProps.paletteCtx(g) : g;
+    kit.details(hg, L, rng);
     const props = L.props.slice().sort((a, b) => a.y - b.y);
-    for (const p of props) p.draw(g, rng);
+    // props.js paints each prop as its own sprite too, for depth sorting.
+    if (!house("paintProps", g, props, rng, room)) for (const p of props) p.draw(hg, rng);
     kit.walls(g, L, rng);
     const doors = roomDoors(room);
     const doorBiome = { floor2: kit.door };
