@@ -1,0 +1,46 @@
+/* Version label and "What's new" box (see version.js). The box reuses the
+   feedback dialog styles from feedback.css. */
+
+.version-chip {
+  display: inline-block;
+  margin: 0 0 6px;
+  padding: 2px 8px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--muted);
+  font: 700 0.8rem var(--display);
+  cursor: pointer;
+  box-shadow: 0 2px 0 #0d0a08;
+}
+
+.version-chip:hover,
+.version-chip:focus-visible {
+  border-color: var(--gold);
+  color: var(--gold);
+  outline: none;
+}
+
+.version-list {
+  display: grid;
+  gap: 12px;
+  max-height: 50vh;
+  margin: 0;
+  padding: 0;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.version-list > li > strong {
+  color: var(--gold);
+  font-family: var(--display);
+}
+
+.version-date {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.version-list ul {
+  margin: 4px 0 0;
+  padding-left: 18px;
+}
