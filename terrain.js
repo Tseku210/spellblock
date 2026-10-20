@@ -1052,16 +1052,15 @@
     let hx0 = -1, hx1 = -1;
     for (let x = x0; x < x1; x += CELL) if (isHazard(cellAt(L, x, midY))) { if (hx0 < 0) hx0 = x; hx1 = x; }
     for (let y = y0; y < y0 + h; y += CELL) for (let x = x0; x < x1; x += CELL) if (y >= T && y < H - T) L.grid[(y >> 2) * GW + (x >> 2)] = BRIDGE;
-    if (hx0 >= 0) {
-      L.solids.push([hx0 - 6, y0 - 10, hx1 - hx0 + 16, 8]);
-      L.solids.push([hx0 - 6, y0 + h - 2, hx1 - hx0 + 16, 8]);
-    }
-    L.bridges.push({ type, x0, x1, y0, h });
+    const rails = hx0 < 0 ? [] : [[hx0 - 6, y0 - 10, hx1 - hx0 + 16, 8], [hx0 - 6, y0 + h - 2, hx1 - hx0 + 16, 8]];
+    L.solids.push(...rails);
+    L.bridges.push({ type, x0, x1, y0, h, rails });
   }
 
   // A prop is anything that stands on the floor. Solid ones become invisible stone blocks.
   function prop(L, x, y, r, box, draw, onRails = false) {
     x = snap(x); y = snap(y);
+    if (L.exact) return keepProp(L, x, y, r, box, draw);
     if (x - r * 0.6 < T || x + r * 0.6 > W - T || y < T + 8 || y > H - T) return false;
     const pts = [[0, 0], [r, 0], [-r, 0], [0, -r * 0.5], [0, r * 0.4], [r * 0.7, -r * 0.4], [-r * 0.7, -r * 0.4]];
     for (const [dx, dy] of pts) {
@@ -1071,6 +1070,9 @@
     // Far enough apart that neighbours don't pile onto each other.
     for (const q of L.props) if (Math.hypot(q.x - x, (q.y - y) * 1.3) < (q.r + r) * 1.25) return false;
     if (!onRails) for (const [kx, ky, kr] of L.keep) if (Math.hypot(kx - x, ky - y) < kr + r * 0.8) return false;
+    return keepProp(L, x, y, r, box, draw);
+  }
+  function keepProp(L, x, y, r, box, draw) {
     L.props.push({ x, y, r, draw });
     if (box) L.solids.push([x + box[0], y + box[1], box[2], box[3]]);
     return true;
@@ -1114,6 +1116,16 @@
     stalagmite: (L, x, y, h, pal) => propNear(L, x, y, 14, [-10, -12, 20, 12], (g) => stalagmite(g, x, y, h, pal)),
     sandColumn: (L, x, y, h) => propNear(L, x, y, 20, [0, -16, 32, 16], (g) => brokenColumnSand(g, x, y, h))
   };
+  // Each prop keeps the call that made it ({ k: "oak", a: [x, y, r, fruit] }), so the room editor can save and rebuild rooms.
+  for (const kind of Object.keys(add)) {
+    const make = add[kind];
+    add[kind] = (L, ...args) => {
+      const n = L.props.length;
+      const ok = make(L, ...args);
+      if (L.props.length > n) L.props[n].spec = { k: kind, a: args };
+      return ok;
+    };
+  }
 
   /* ---------- painting the terrain kinds ---------- */
   // Distance (in cells) from every cell to the nearest cell of a kind, or, inside, to the nearest cell that isn't.
@@ -1858,6 +1870,8 @@
 
   /* ---------- building a room's layout ---------- */
   const layouts = new Map();
+  // Rooms the admin built in the room editor, shared with every player (room index -> plan).
+  const savedPlans = {};
   function nearCamp(L, x, y) {
     for (const z of L.camp) if ((x - z.x) ** 2 + (y - z.y) ** 2 < z.r * z.r) return true;
     return false;
@@ -1869,6 +1883,12 @@
     if (!terrainRoom(room)) return null;
     let L = layouts.get(room.index);
     if (L) return L;
+    L = savedLayout(room);
+    layouts.set(room.index, L);
+    return L;
+  }
+  // The room as its biome kit draws it, before any editing.
+  function freshLayout(room) {
     const bi = biomes.indexOf(room.biome);
     const k = (room.index % ROOM_COLS) % ROOM_PER_CHAPTER;
     L = { grid: new Uint8Array(GW * GH), has: [], solids: [], props: [], keep: [], pits: [], bridges: [], clear: [], camp: [], bi, k, rng: mulberry32(room.index * 7717 + 99), kit: KITS[bi] };
@@ -1881,7 +1901,6 @@
       L.clear.push({ x0: Math.min(fire.x, stall.x), x1: Math.max(fire.x, stall.x), y0: fire.y - 70, y1: fire.y + 70 });
     }
     L.kit.build(L, k);
-    layouts.set(room.index, L);
     return L;
   }
 
@@ -2143,6 +2162,343 @@
       for (const drop of room.staffDrops || []) if (isHazard(cellAt(L, drop.x, drop.y))) { const s = nearestSafe(L, room, drop.x, drop.y, 12); drop.x = s.x; drop.y = s.y; }
     }
     return originalUpdatePickups(dt);
+  };
+
+  /* ---------- room plans (the room editor) ----------
+     A plan is everything the room editor can change in a room: the ground
+     grid, the props (each as the add.* call that makes it) and the bridges.
+     Edited rooms are shared through the game server (functions/api/rooms.js)
+     and rebuilt from their plan; room-editor.js loads them and is the screen
+     that edits them. */
+  const SIZE_ARGS = { oak: [0], willow: [0], pine: [0], rocks: [0], stone: [0], pyramid: [0, 1], crystals: [0], column: [0], mushroomTree: [0], stalagmite: [0], sandColumn: [0] };
+  const FLIP_ARGS = { statue: [0], palm: [0], deadTree: [0] };
+  const WET = [WATER, LAVA, CHASM];
+  const EMPTY_GRID = new Uint8Array(GW * GH);
+  const gridAt = (grid, x, y) => grid[(y >> 2) * GW + (x >> 2)];
+  const sizedArgs = (k, args, size) => args.map((v, i) => ((SIZE_ARGS[k] || []).includes(i) ? Math.round(v * size * 100) / 100 : v));
+  // A throwaway layout for measuring or drawing one prop on its own.
+  const scratchLayout = () => ({ grid: EMPTY_GRID, has: [], solids: [], props: [], keep: [], pits: [], bridges: [], clear: [], camp: [], rng: mulberry32(1), exact: true });
+
+  function planOf(L) {
+    return {
+      grid: L.grid.slice(),
+      props: L.props.filter((p) => p.spec).map((p) => ({ k: p.spec.k, a: p.spec.a.slice() })),
+      bridges: L.bridges.map((b) => ({ type: b.type, x0: b.x0, x1: b.x1, y0: b.y0, h: b.h, rails: (b.rails || []).map((r) => r.slice()) }))
+    };
+  }
+  const copyPlan = (plan) => ({
+    grid: plan.grid.slice(),
+    props: plan.props.map((p) => ({ k: p.k, a: p.a.slice() })),
+    bridges: plan.bridges.map((b) => ({ ...b, rails: b.rails.map((r) => r.slice()) }))
+  });
+
+  // Quicksand pulls toward a pit: keep the kit's pits that are still quicksand, and give every other patch one in its middle.
+  function quickPits(L) {
+    const pits = L.pits.filter((p) => cellAt(L, p.x, p.y) === QUICK);
+    const patch = new Int32Array(GW * GH).fill(-1);
+    for (let i = 0; i < patch.length; i += 1) {
+      if (L.grid[i] !== QUICK || patch[i] >= 0) continue;
+      const stack = [i];
+      let sx = 0, sy = 0, n = 0;
+      patch[i] = i;
+      while (stack.length) {
+        const j = stack.pop(), x = j % GW, y = (j / GW) | 0;
+        sx += x; sy += y; n += 1;
+        for (const [nx, ny] of [[x - 1, y], [x + 1, y], [x, y - 1], [x, y + 1]]) {
+          const m = ny * GW + nx;
+          if (nx < 0 || ny < 0 || nx >= GW || ny >= GH || patch[m] >= 0 || L.grid[m] !== QUICK) continue;
+          patch[m] = i;
+          stack.push(m);
+        }
+      }
+      if (!pits.some((p) => patch[(p.y >> 2) * GW + (p.x >> 2)] === i)) pits.push({ x: (sx / n) * CELL + 2, y: (sy / n) * CELL + 2 });
+    }
+    return pits;
+  }
+
+  function layoutFromPlan(room, plan) {
+    const L = freshLayout(room);
+    L.grid.set(plan.grid);
+    L.has = [];
+    for (const v of L.grid) L.has[v] = true;
+    L.fields = null;
+    L.props = [];
+    L.solids = [];
+    L.exact = true;
+    for (const p of plan.props) add[p.k](L, ...p.a);
+    L.exact = false;
+    L.bridges = plan.bridges.map((b) => ({ ...b }));
+    for (const b of L.bridges) L.solids.push(...b.rails);
+    L.pits = quickPits(L);
+    L.edited = true;
+    return L;
+  }
+  function savedLayout(room) {
+    const plan = savedPlans[room.index];
+    if (!plan) return freshLayout(room);
+    try {
+      return layoutFromPlan(room, plan);
+    } catch (err) {
+      console.error("Saved room could not be built, using the normal one.", err);
+      delete savedPlans[room.index];
+      return freshLayout(room);
+    }
+  }
+
+  // Saved plans: the grid as runs ("kind" + count in base 36), props as [kind, ...args].
+  function encodePlan(plan) {
+    const runs = [];
+    let kind = plan.grid[0], n = 0;
+    for (const v of plan.grid) {
+      if (v === kind) { n += 1; continue; }
+      runs.push(kind + n.toString(36));
+      kind = v; n = 1;
+    }
+    runs.push(kind + n.toString(36));
+    return { g: runs.join(","), p: plan.props.map((p) => [p.k, ...p.a]), b: plan.bridges.map((b) => [b.type, b.x0, b.x1, b.y0, b.h, b.rails]) };
+  }
+  // Shared plans come from outside the game, so every part is checked.
+  function isNum(v) {
+    return typeof v === "number" && Number.isFinite(v);
+  }
+  function isArg(v) {
+    if (v === null || v === undefined || ["number", "boolean", "string"].includes(typeof v)) return true;
+    return typeof v === "object" && Object.values(v).every((c) => typeof c === "string" || typeof c === "number");
+  }
+  function decodePlan(o) {
+    if (!o || typeof o.g !== "string" || !Array.isArray(o.p) || !Array.isArray(o.b) || o.p.length > 400 || o.b.length > 40) return null;
+    const grid = new Uint8Array(GW * GH);
+    let at = 0;
+    for (const run of o.g.split(",")) {
+      const kind = run.charCodeAt(0) - 48, n = parseInt(run.slice(1), 36);
+      if (!(kind >= FLOOR && kind <= PATH) || !(n > 0) || at + n > grid.length) return null;
+      grid.fill(kind, at, at + n);
+      at += n;
+    }
+    if (at !== grid.length) return null;
+    const props = [];
+    for (const p of o.p) {
+      if (!Array.isArray(p) || !Object.prototype.hasOwnProperty.call(add, p[0]) || !isNum(p[1]) || !isNum(p[2]) || !p.slice(3).every(isArg)) return null;
+      props.push({ k: p[0], a: p.slice(1) });
+    }
+    const bridges = [];
+    for (const b of o.b) {
+      if (!Array.isArray(b) || (b[0] !== "stone" && b[0] !== "rope") || !b.slice(1, 5).every(isNum)) return null;
+      if (!Array.isArray(b[5]) || !b[5].every((r) => Array.isArray(r) && r.length === 4 && r.every(isNum))) return null;
+      bridges.push({ type: b[0], x0: b[1], x1: b[2], y0: b[3], h: b[4], rails: b[5] });
+    }
+    return { grid, props, bridges };
+  }
+  function decodePlans(saved) {
+    const plans = {};
+    for (const [index, o] of Object.entries(saved || {})) {
+      const i = Number(index), plan = decodePlan(o);
+      if (plan && Number.isInteger(i) && i >= 0 && i < ROOM_COUNT) plans[i] = plan;
+    }
+    return plans;
+  }
+  // Switch a room to a new layout: new invisible blocks, nobody left standing in lava.
+  function useLayout(room, L) {
+    layouts.set(room.index, L);
+    lastRoom = null;
+    room.terrainFor = null;
+    room.crates = room.crates.filter((c) => !c.terrain);
+    if (room.populated) applyTerrain(room);
+    if (room === currentRoom()) {
+      for (const p of activePlayers()) {
+        if (isHazard(cellAt(L, p.x, p.y)) || blockedBySolid(room, p.x, p.y, 14)) {
+          const s = nearestSafe(L, room, p.x, p.y, 14);
+          p.x = s.x; p.y = s.y;
+        }
+        p.terrainSafeX = p.x; p.terrainSafeY = p.y;
+      }
+    }
+    bgRoomIndex = -1;
+  }
+
+  // Paint a round brush of one ground kind. Doorways, the campfire and bridges stay as they are.
+  function paintPlan(plan, room, x, y, radius, kind) {
+    const L = layoutFor(room);
+    const cx0 = Math.max(T / CELL, Math.floor((x - radius) / CELL)), cx1 = Math.min((W - T) / CELL - 1, Math.floor((x + radius) / CELL));
+    const cy0 = Math.max(T / CELL, Math.floor((y - radius) / CELL)), cy1 = Math.min((H - T) / CELL - 1, Math.floor((y + radius) / CELL));
+    let changed = false;
+    for (let cy = cy0; cy <= cy1; cy += 1) for (let cx = cx0; cx <= cx1; cx += 1) {
+      const px = cx * CELL + 2, py = cy * CELL + 2, i = cy * GW + cx;
+      if ((px - x) ** 2 + (py - y) ** 2 > radius * radius) continue;
+      if (plan.grid[i] === kind || plan.grid[i] === BRIDGE) continue;
+      if (kind !== FLOOR && inClear(L, px, py)) continue;
+      plan.grid[i] = kind;
+      changed = true;
+    }
+    return changed;
+  }
+
+  // A prop fits when it is inside the room and its solid part keeps the doorways and campfire clear.
+  function propFits(room, tpl, size, x, y) {
+    x = snap(x); y = snap(y);
+    if (x < T + 12 || x > W - T - 12 || y < T + 20 || y > H - T - 4) return false;
+    const L = layoutFor(room);
+    if (inClear(L, x, y)) return false;
+    const tmp = scratchLayout();
+    add[tpl.k](tmp, x, y, ...sizedArgs(tpl.k, tpl.args, size));
+    for (const [sx, sy, sw, sh] of tmp.solids) {
+      for (let py = sy; py <= sy + sh; py += 8) for (let px = sx; px <= sx + sw; px += 8) if (inClear(L, px, py)) return false;
+    }
+    return true;
+  }
+  function addPropPlan(plan, room, tpl, size, x, y) {
+    if (!propFits(room, tpl, size, x, y)) return false;
+    plan.props.push({ k: tpl.k, a: [snap(x), snap(y), ...sizedArgs(tpl.k, tpl.args, size)] });
+    return true;
+  }
+
+  // What is under a spot: the front-most prop, or a bridge. Uses the room's built layout, which matches its plan.
+  function hitPlan(plan, room, x, y) {
+    const L = layoutFor(room);
+    let best = null;
+    for (const p of L.props) {
+      if (!p.spec) continue;
+      const [px, py] = p.spec.a, r = Math.max(p.r, 12);
+      const box = [px - r * 0.8, py - r * 1.8, r * 1.6, r * 1.8 + 8];
+      if (x < box[0] || x > box[0] + box[2] || y < box[1] || y > box[1] + box[3]) continue;
+      if (best && py <= best.y) continue;
+      const index = plan.props.findIndex((q) => q.k === p.spec.k && q.a[0] === px && q.a[1] === py);
+      if (index >= 0) best = { type: "prop", index, y: py, box };
+    }
+    if (best) return best;
+    const index = plan.bridges.findIndex((b) => x >= b.x0 && x <= b.x1 && y >= b.y0 - 10 && y <= b.y0 + b.h + 6);
+    if (index < 0) return null;
+    const b = plan.bridges[index];
+    return { type: "bridge", index, box: [b.x0, b.y0 - 10, b.x1 - b.x0, b.h + 16] };
+  }
+  function removePlan(plan, hit) {
+    if (hit.type === "prop") {
+      plan.props.splice(hit.index, 1);
+      return;
+    }
+    const [b] = plan.bridges.splice(hit.index, 1);
+    // Give the ground under the bridge back to the water, lava or hole around it.
+    for (let y = b.y0; y < b.y0 + b.h; y += CELL) for (let x = b.x0; x < b.x1; x += CELL) {
+      const i = (y >> 2) * GW + (x >> 2);
+      if (plan.grid[i] !== BRIDGE) continue;
+      const up = gridAt(plan.grid, x, b.y0 - CELL), down = gridAt(plan.grid, x, b.y0 + b.h);
+      plan.grid[i] = WET.includes(up) ? up : WET.includes(down) ? down : FLOOR;
+    }
+  }
+  // A bridge goes left to right across the water, lava or hole that was clicked.
+  function addBridgePlan(plan, x, y) {
+    x = Math.floor(x / CELL) * CELL; y = Math.floor(y / CELL) * CELL;
+    const kind = gridAt(plan.grid, x, y);
+    if (!WET.includes(kind)) return "not-wet";
+    let left = x, right = x;
+    while (left > T && WET.includes(gridAt(plan.grid, left - CELL, y))) left -= CELL;
+    while (right < W - T - CELL && WET.includes(gridAt(plan.grid, right + CELL, y))) right += CELL;
+    if (right - left > 520) return "too-wide";
+    const x0 = Math.max(T, left - 20), x1 = Math.min(W - T, right + CELL + 20);
+    const y0 = Math.max(T, Math.min(H - T - 48, y - 24));
+    addBridge({ grid: plan.grid, solids: [], bridges: plan.bridges }, kind === CHASM ? "rope" : "stone", x0, x1, y0, 48);
+    return "ok";
+  }
+
+  // Props the editor offers: one of each kind of prop the kits use, this room's world first.
+  let templateList = null;
+  function templates(room) {
+    if (!templateList) {
+      templateList = [];
+      const seen = new Set();
+      for (const r of rooms) {
+        if (!terrainRoom(r)) continue;
+        const L = freshLayout(r);
+        for (const p of L.props) {
+          if (!p.spec) continue;
+          const k = p.spec.k, args = p.spec.a.slice(2);
+          const loose = [...(SIZE_ARGS[k] || []), ...(FLIP_ARGS[k] || [])];
+          const kept = args.filter((v, i) => !loose.includes(i));
+          while (kept.length && kept[kept.length - 1] == null) kept.pop();
+          const key = k + JSON.stringify(kept);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          templateList.push({ k, args, biome: L.bi });
+        }
+      }
+    }
+    const bi = biomes.indexOf(room.biome);
+    return templateList.filter((t) => t.biome === bi).concat(templateList.filter((t) => t.biome !== bi));
+  }
+  // A cropped picture of one prop, and where its base sits in that picture.
+  let iconScratch = null;
+  function propIcon(tpl, size = 1) {
+    const L = scratchLayout();
+    add[tpl.k](L, 200, 300, ...sizedArgs(tpl.k, tpl.args, size));
+    const p = L.props[0];
+    if (!p) return null;
+    if (!iconScratch) {
+      iconScratch = document.createElement("canvas");
+      iconScratch.width = 400;
+      iconScratch.height = 400;
+    }
+    const g = iconScratch.getContext("2d", { willReadFrequently: true });
+    g.clearRect(0, 0, 400, 400);
+    p.draw(window.houseProps ? window.houseProps.paletteCtx(g) : g, mulberry32(7));
+    const d = g.getImageData(0, 0, 400, 400).data;
+    let x0 = 400, y0 = 400, x1 = -1, y1 = -1;
+    for (let y = 0; y < 400; y += 1) for (let x = 0; x < 400; x += 1) {
+      if (d[(y * 400 + x) * 4 + 3] < 200) continue;
+      if (x < x0) x0 = x;
+      if (x > x1) x1 = x;
+      if (y < y0) y0 = y;
+      if (y > y1) y1 = y;
+    }
+    if (x1 < 0) return null;
+    const out = document.createElement("canvas");
+    out.width = x1 - x0 + 1;
+    out.height = y1 - y0 + 1;
+    out.getContext("2d").drawImage(iconScratch, x0, y0, out.width, out.height, 0, 0, out.width, out.height);
+    return { img: out, baseX: 200 - x0, baseY: 300 - y0 };
+  }
+
+  // Rooms from the game server: returns how many were good enough to use.
+  function loadShared(saved) {
+    const plans = decodePlans(saved);
+    for (const [index, plan] of Object.entries(plans)) {
+      savedPlans[index] = plan;
+      useLayout(rooms[index], savedLayout(rooms[index]));
+    }
+    return Object.keys(plans).length;
+  }
+
+  window.roomPlans = {
+    W, H, T, CELL,
+    ground: { FLOOR, WATER, LAVA, CHASM, ICE, QUICK, SNOW, BRIDGE, PATH },
+    editable: terrainRoom,
+    plan: (room) => planOf(layoutFor(room)),
+    copy: copyPlan,
+    edited: (room) => Boolean(savedPlans[room.index]),
+    // Use a plan for a room; returns it in the shape the server stores.
+    save(room, plan) {
+      savedPlans[room.index] = copyPlan(plan);
+      useLayout(room, savedLayout(room));
+      return encodePlan(savedPlans[room.index]);
+    },
+    reset(room) {
+      delete savedPlans[room.index];
+      useLayout(room, freshLayout(room));
+    },
+    loadShared,
+    // Paints the room into the game's background canvas and returns it.
+    render(room) {
+      window.renderRoomBackground(room);
+      return bgCanvas;
+    },
+    clearZones: (room) => layoutFor(room).clear,
+    paint: paintPlan,
+    fits: propFits,
+    addProp: addPropPlan,
+    hit: hitPlan,
+    remove: removePlan,
+    addBridge: addBridgePlan,
+    templates,
+    icon: propIcon
   };
 
   // For tests: what the ground is at a spot in the current room.

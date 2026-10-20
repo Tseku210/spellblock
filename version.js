@@ -7,8 +7,9 @@
 // written for kids. Load this file last in index.html: it wraps drawTitle and
 // drawPauseScreen, which other files replace.
 (() => {
-  const VERSION = "1.9";
+  const VERSION = "1.10";
   const CHANGES = [
+    { version: "1.10", date: "Oct 21", notes: ["The dungeon can now be redesigned room by room. Keep your eyes open for new ponds, lava rivers and secret corners!"] },
     { version: "1.9", date: "Oct 20", notes: ["Ideas from your feedback! Armor drops from bosses, campfire travel (press T), a sandworm in the desert, void rifts in long boss fights, a Blizzard that freezes shots, and a secret boss hiding in the mines..."] },
     { version: "1.8", date: "Oct 20", notes: ["The game now shows its version number. After every update, this box tells you what's new."] },
     { version: "1.7", date: "Oct 17", notes: ["Every boss has its own special moves, and bosses fight smarter and harder."] },

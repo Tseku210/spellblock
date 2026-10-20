@@ -1,0 +1,268 @@
+/* Room editor (see room-editor.js). Uses the game's colors from style.css. */
+
+.room-editor-btn {
+  border-color: var(--green);
+  color: #b8f0a8;
+}
+
+.room-editor {
+  width: 100vw;
+  height: 100vh;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--display);
+  overflow: hidden;
+}
+
+.room-editor[open] {
+  display: flex;
+  flex-direction: column;
+}
+
+.room-editor::backdrop {
+  background: var(--bg);
+}
+
+.room-editor button {
+  font-family: var(--display);
+}
+
+.re-top {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 16px;
+  padding: 10px 16px;
+  border-bottom: 4px solid var(--line);
+  background: var(--panel);
+}
+
+.re-top h2 {
+  margin: 0;
+  color: var(--gold);
+  font-size: 1.4rem;
+  text-shadow: 2px 2px 0 #000;
+}
+
+.re-room {
+  padding: 6px 8px;
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  font: 600 0.95rem var(--display);
+}
+
+.re-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.re-actions .chip-btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+.re-done {
+  border-color: var(--gold);
+  color: var(--gold);
+}
+
+.re-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.re-tools {
+  width: 290px;
+  flex: none;
+  overflow-y: auto;
+  padding: 12px 14px 20px;
+  border-right: 4px solid var(--line);
+  background: var(--panel);
+}
+
+.re-tools section + section {
+  margin-top: 16px;
+}
+
+.re-tools h3 {
+  margin: 0 0 8px;
+  color: var(--gold);
+  font-size: 1.05rem;
+}
+
+.re-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.re-row > span:first-child {
+  min-width: 44px;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.re-ground {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.re-swatch,
+.re-tool,
+.re-choice,
+.re-prop {
+  border: 2px solid var(--line);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+  box-shadow: 0 3px 0 #0d0a08;
+}
+
+.re-swatch {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  font-size: 0.9rem;
+  text-align: left;
+}
+
+.re-swatch::before {
+  content: "";
+  width: 18px;
+  height: 18px;
+  flex: none;
+  border: 2px solid #000;
+  background: var(--c);
+}
+
+.re-tool {
+  padding: 6px 12px;
+  font-size: 0.9rem;
+}
+
+.re-choice {
+  padding: 4px 8px;
+  font-size: 0.8rem;
+}
+
+.re-props {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+}
+
+.re-prop {
+  display: grid;
+  place-items: center;
+  aspect-ratio: 1;
+  padding: 2px;
+}
+
+.re-prop canvas {
+  image-rendering: pixelated;
+  max-width: 100%;
+  max-height: 100%;
+}
+
+.re-label {
+  margin: 12px 0 6px;
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.re-swatch:hover,
+.re-tool:hover,
+.re-choice:hover,
+.re-prop:hover {
+  border-color: var(--gold);
+}
+
+.room-editor .on {
+  border-color: var(--gold);
+  background: #4a3a22;
+  box-shadow: 0 0 0 2px var(--gold);
+}
+
+.re-stage {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-width: 0;
+  padding: 12px;
+}
+
+.re-canvas {
+  width: auto;
+  height: auto;
+  max-width: 100%;
+  max-height: calc(100vh - 140px);
+  aspect-ratio: 3 / 2;
+  border: 4px solid var(--line);
+  image-rendering: pixelated;
+  cursor: crosshair;
+  touch-action: none;
+}
+
+.re-hint {
+  min-height: 1.3em;
+  margin: 0;
+  color: var(--muted);
+  text-align: center;
+}
+
+.re-sync {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.re-sync[data-tone="ok"] {
+  color: #b8f0a8;
+}
+
+.re-sync[data-tone="error"] {
+  color: #ff9a8a;
+}
+
+@media (max-width: 760px) {
+  .re-body {
+    flex-direction: column;
+    overflow-y: auto;
+  }
+
+  .re-stage {
+    order: -1;
+    flex: none;
+    padding: 8px;
+  }
+
+  .re-tools {
+    width: auto;
+    border-right: 0;
+    border-top: 4px solid var(--line);
+    overflow: visible;
+  }
+
+  .re-props {
+    grid-template-columns: repeat(6, 1fr);
+  }
+
+  .re-actions {
+    margin-left: 0;
+  }
+}
