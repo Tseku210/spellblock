@@ -150,7 +150,8 @@ const biomes = [
    has two chapters of three rooms. The third room of a chapter holds the
    chapter boss (a sword boss), and the world ends with a big boss arena.
    Beat the big boss and the door on the right of its arena leads to the next
-   world. The last arena opens the golden portal to the dragon. */
+   world. The last arena opens the golden portal to the Black Keep, where
+   Sir Grimhelm the Dread Knight waits (knight.js). */
 const ROOM_PER_CHAPTER = 3;
 const worlds = [
   { name: "Greenwood", color: "#7ee36f", biomes: [0, 5] },
@@ -160,7 +161,7 @@ const worlds = [
   { name: "Crystal Depths", color: "#c4a8ff", biomes: [8, 9] }
 ];
 
-const dragonBiome = { name: "Dragon's Hoard", floor: "#5a4318", floor2: "#4a3612", wall: "#2a1d0a", ambient: "ember", root: 53 };
+const keepBiome = { name: "The Black Keep", floor: "#3a3854", floor2: "#221f36", wall: "#1d1a2f", ambient: "ember", root: 53 };
 
 const robes = [
   { name: "Sky", robe: "#3b82f6", trim: "#1d4ed8", hat: "#2557c9" },
@@ -170,8 +171,9 @@ const robes = [
 ];
 
 /* Hat 0 is the starter hat. Hats 1-15 drop from the boss of each enemy type
-   (hat = typeIndex + 1), hat 16 comes from befriending the dragon and
-   hats 17-21 come from the five big bosses. */
+   (hat = typeIndex + 1), hat 16 came from befriending the dragon (who has
+   left the dungeon), hats 17-21 come from the five big bosses and hat 22
+   from beating Sir Grimhelm. */
 const hats = [
   { name: "Wizard Hat", from: "Every wizard starts with one" },
   { name: "King Zombo's Crown", from: "King Zombo" },
@@ -194,10 +196,12 @@ const hats = [
   { name: "Magma Helm", from: "Magmaw the Lava Golem" },
   { name: "Frostbite Crown", from: "Queen Frostbite" },
   { name: "Shadowfang Top Hat", from: "Count Shadowfang" },
-  { name: "Crystal Halo", from: "Crystal Colossus" }
+  { name: "Crystal Halo", from: "Crystal Colossus" },
+  { name: "Dread Helm", from: "Sir Grimhelm" }
 ];
 const DRAGON_HAT = 16;
 const BIG_HAT = 17;
+const DREAD_HAT = 22;
 
 const combos = [
   { id: "steam", name: "Steam Blast", recipe: "Fireball + Frost Nova", color: "#e6f7ff", hint: "What happens if a fireball lands on something frozen?", desc: "Blow up a fireball on a frozen enemy or inside the frosty puddle for a huge steam blast." },
@@ -587,13 +591,14 @@ function bigSeconds(row) {
   return 28 + row * 6;
 }
 
-// Big bosses and the dragon are the final bosses: tougher in every way.
+// Big bosses and the last boss are the final bosses: tougher in every way
+// (knight.js adds Sir Grimhelm).
 function isFinal(boss) {
   return Boolean(boss && (boss.isBig || boss.isDragon));
 }
 
 function bossMaxHp(room) {
-  if (room.final) return bossHpFor(30, 45, true);
+  if (room.final) return bossHpFor(30, 60, true);
   if (room.arena) return bossHpFor(room.tier, bigSeconds(room.row) * (room.boss && room.boss.phase2 ? PHASE2_SHARE : 1 - PHASE2_SHARE), true);
   return bossHpFor(room.tier);
 }
@@ -977,7 +982,7 @@ function createRooms() {
     const chapter = (index % ROOM_COLS) < ROOM_PER_CHAPTER ? 0 : 1;
     list.push({ index, biome: biomes[worlds[row].biomes[chapter]], visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false });
   }
-  list.push({ index: DRAGON_ROOM, biome: dragonBiome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 30, final: true });
+  list.push({ index: DRAGON_ROOM, biome: keepBiome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 30, final: true });
   bigBosses.forEach((big, row) => {
     list.push({ index: ARENA_START + row, biome: big.biome, visited: false, populated: false, cleared: false, enemies: [], boss: null, crates: [], tier: 0, final: false, arena: true, row });
   });
@@ -1023,7 +1028,7 @@ function roomChapter(room) {
 // "World 2 · Chapter 1 · Room 3" style labels for the HUD and the tracker.
 function roomLabel(room, short = false) {
   if (room.tree) return "Spirit Tree";
-  if (room.final) return "Dragon's Lair";
+  if (room.final) return "The Black Keep";
   const w = roomRow(room) + 1;
   if (room.arena) return short ? `World ${w} · Big Boss` : `World ${w} · Big Boss Arena`;
   const n = (room.index % ROOM_PER_CHAPTER) + 1;
@@ -1270,7 +1275,7 @@ function populateRoom(room, entry, tier) {
     return;
   }
   if (room.final) {
-    room.boss = makeDragon();
+    room.boss = makeKnight();
     return;
   }
   if (room.arena) {
@@ -3586,7 +3591,7 @@ function updateLostCoins(p) {
 function resetBoss(room) {
   if (!room.boss || room.boss.hp <= 0 || room.boss.friendly) return;
   if (room.arena) room.boss = makeBigBoss(room.row, room.tier);
-  else if (room.final) room.boss = makeDragon();
+  else if (room.final) room.boss = makeKnight();
   else {
     Object.assign(room.boss, { hp: room.boss.maxHp, enraged: false, furious: false, state: "move", spiralTime: 0, stunUntil: 0, alpha: 1, hop: 0, swings: null, totemDone: false, opener: false, swordOutUntil: 0 });
     room.boss.patternIndex = 0;
@@ -11571,13 +11576,9 @@ function drawDeadScreen() {
 function drawVictoryScreen() {
   dim(0.55);
   outlinedText(state.treeMode ? "Spirit Tree Saved!" : "Dungeon Complete!", WIDTH / 2, 96, { size: 60, align: "center", font: DISPLAY_FONT, color: state.treeMode ? "#7dffb0" : "#f6c85f" });
-  outlinedText(state.treeMode ? `You held off all ${TREE_WAVES} waves!` : "Blocky the Dragon is your friend now.", WIDTH / 2, 134, { size: 20, align: "center", color: "#ff9ff3" });
+  outlinedText(state.treeMode ? `You held off all ${TREE_WAVES} waves!` : "Sir Grimhelm bows to you.", WIDTH / 2, 134, { size: 20, align: "center", color: "#ff9ff3" });
 
-  ctx.save();
-  ctx.translate(WIDTH / 2 + 120, 270);
-  ctx.scale(1.2, 1.2);
-  drawDragon(ctx, { x: 0, y: 0, size: 96, friendly: true }, state.anim);
-  ctx.restore();
+  if (!state.treeMode) drawKnightBow(WIDTH / 2 + 150, 250, 1.2);
   activePlayers().forEach((p, i) => {
     const look = state.looks[p.index];
     ctx.save();
@@ -11817,7 +11818,7 @@ function renderHats() {
       hat.icon.title = `${hat.name} (from ${hat.from}). Click to wear it.`;
       drawWizard(g, 24, 44, look.robe, 0, 0.3, 0, false, id);
     } else {
-      hat.icon.title = id === DRAGON_HAT ? "A secret hat. Who could have it?" : `Beat ${hat.from} to win this hat`;
+      hat.icon.title = id === DRAGON_HAT ? "Blocky has left the dungeon. Only old heroes have this hat." : `Beat ${hat.from} to win this hat`;
       g.fillStyle = "#3a2c20";
       g.fillRect(13, 15, 22, 22);
       g.fillStyle = "#c5a988";
@@ -11935,7 +11936,7 @@ function updateInterface(dt) {
   if (state.mode === "title") goal = "Press start";
   else if (state.won) goal = "You won!";
   else if (room.tree) goal = state.tree && state.tree.phase === "break" ? "Get ready for the next wave" : "Protect the Spirit Tree!";
-  else if (room.final) goal = "Calm down Blocky the Dragon";
+  else if (room.final) goal = "Defeat Sir Grimhelm";
   else if (state.portalOpen) goal = "Step into the golden portal in the last arena";
   else if (room.arena) goal = bossAlive ? `Beat ${room.boss.name}!` : `On to World ${room.row + 2} through the right door`;
   else if (bossAlive) goal = "Defeat this room boss";
